@@ -1,0 +1,43 @@
+diff --git a/UI/GamepadEmu.h b/UI/GamepadEmu.h
+index 6b106f6..2f3a546 100644
+--- a/UI/GamepadEmu.h
++++ b/UI/GamepadEmu.h
+@@ -285,6 +285,12 @@ namespace CustomKeyData {
+ 		{ ImageID("I_ARROW_DOWN"), 0.0f},
+ 		{ ImageID("I_THREE_DOTS"), 0.0f},
+ 		{ ImageID("I_EMPTY"), 0.0f},
++		// Guilty Gear arcade labels (indices 36-40, used by the launcher's arcade layout). Keep at the end.
++		{ ImageID("I_GG_P"), 0.0f},
++		{ ImageID("I_GG_K"), 0.0f},
++		{ ImageID("I_GG_S"), 0.0f},
++		{ ImageID("I_GG_HS"), 0.0f},
++		{ ImageID("I_GG_D"), 0.0f},
+ 	};
+ 
+ 	// Shape list
+diff --git a/UI/UIAtlas.cpp b/UI/UIAtlas.cpp
+index 791c1d8..c5a2e8f 100644
+--- a/UI/UIAtlas.cpp
++++ b/UI/UIAtlas.cpp
+@@ -197,6 +197,12 @@ static const ImageMeta g_uiImageIDs[] = {
+ 	{"I_ARCHIVE_ZIP", false},
+ 	{"I_ARCHIVE_7Z", false},
+ 	{"I_ARCHIVE_RAR", false},
++	// Arcade-style button labels for the Guilty Gear launcher build (ui_images/gg_buttons.svg).
++	{"I_GG_P", true},
++	{"I_GG_K", true},
++	{"I_GG_S", true},
++	{"I_GG_HS", true},
++	{"I_GG_D", true},
+ };
+ 
+ static std::string PNGNameFromID(std::string_view id) {
+@@ -390,6 +396,8 @@ static bool GenerateUIAtlasImage(Atlas *atlas, float dpiScale, Image *dest, int
+ 			return false;
+ 		}
+ 	}
++	// P / K / S / HS / D labels for the arcade-style touch layout. Optional: ignore if missing.
++	RasterizeSVG("ui_images/gg_buttons.svg", dpiScale, maxTextureSize, imageIDs, imageCount, &images);
+ 	Instant shadowStart = Instant::Now();
+ 
+ 	// We can trivially parallelize shadowing/extension of the images.

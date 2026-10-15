@@ -14,8 +14,8 @@ Por dentro usa el motor de emulación de [PPSSPP](https://www.ppsspp.org/) con u
 |---|---|
 | **Arranque directo** | Sin menús de emulador: pulsas *Jugar* y entra el juego. |
 | **Resolución 1× a 8×** | 1× = 480×272 (PSP original) · 4× = 1920×1088 (Full HD) · **8× = 3840×2176 (4K)**. Te recomienda la mejor para tu pantalla. |
-| **Controles originales** | Cruceta, stick, △ ○ ✕ □, L, R, Start y Select en pantalla. Sin botones extra que no tenía la PSP. |
-| **Controles Bluetooth/USB** | Se detectan solos: A = ✕, B = ○, X = □, Y = △. |
+| **Botones PSP o Arcade** | Elige en la pantalla de inicio: **PSP** (△ ○ ✕ □, L, R, como en la consola) o **Arcade** (P, K, S, HS y D, colocados como en la máquina de Guilty Gear: K S HS arriba, P y D abajo). Con vista previa. |
+| **Controles Bluetooth/USB** | Se detectan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D, L1 = Respeto. |
 | **Vulkan u OpenGL** | Vulkan por defecto (rinde mejor con los efectos de los súper ataques). |
 | **Detecta tu copia** | Lee el archivo y te confirma que es el juego correcto (por ejemplo `ULUS-10409`). |
 | **Partidas y guardados** | Guardado normal del juego y estados rápidos desde el menú de pausa. |
@@ -52,7 +52,8 @@ Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se inst
 | Va lento o se traba | Baja la resolución un nivel. En teléfonos de gama media, 3× o 4× suele ser lo ideal. |
 | Fallos gráficos o pantalla negra | Cambia el motor gráfico a OpenGL. |
 | "No encuentro el juego" | Moviste o borraste el archivo: vuelve a elegirlo. |
-| No aparecen los botones en pantalla | Activa *Botones de PSP en pantalla* en la pantalla de inicio. |
+| No aparecen los botones en pantalla | Activa *Mostrar botones en pantalla* en la pantalla de inicio. |
+| Los botones arcade no hacen el golpe que dicen | Dentro del juego cambiaste la configuración de botones. Vuelve a la de fábrica en las opciones del juego (□ = P, ✕ = K, △ = S, ○ = HS, R = D). |
 | Quiero reasignar el control | En el juego: Atrás → Ajustes → pestaña Controles → asignación de botones. |
 | La app dice "Partida en curso" | El juego quedó abierto en segundo plano: *Continuar* o *Cerrar partida*. |
 
@@ -66,7 +67,8 @@ Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se inst
   - El emulador corre en un proceso aparte (`:emu`). Al salir del juego, ese proceso termina y vuelves a la pantalla de inicio.
   - Los ajustes elegidos se pasan al emulador con `--appendconfig` (resolución interna, motor gráfico, FPS, botones táctiles) y `--pause-menu-exit` para que *Salir* cierre el juego.
   - La "memory stick" se fija en el almacenamiento de la app, así que nunca pide elegir carpeta.
-- **Archivos propios** ([`overlay/`](overlay/)): `LauncherActivity.java`, `GameInspector.java` (lee `PARAM.SFO` de ISO y CSO para identificar el juego), `LaunchContract.java`, tema e íconos.
+  - Etiquetas P, K, S, HS y D para los botones arcade (`patches/0002-arcade-button-labels.patch` + `assets/ui_images/gg_buttons.svg`, generado con [`scripts/make_gg_glyphs.py`](scripts/make_gg_glyphs.py) a partir de la fuente Roboto Condensed que ya trae PPSSPP). El modo arcade usa los botones personalizados de PPSSPP con el mapeo del juego en PSP: □ = P, ✕ = K, △ = S, ○ = HS, R = D.
+- **Archivos propios** ([`overlay/`](overlay/)): `LauncherActivity.java`, `ControlsPreviewView.java` (vista previa de los botones), `GameInspector.java` (lee `PARAM.SFO` de ISO y CSO para identificar el juego), `LaunchContract.java`, tema e íconos.
 - **Compilación**: [`.github/workflows/build.yml`](.github/workflows/build.yml) descarga PPSSPP, aplica los cambios con [`scripts/prepare.sh`](scripts/prepare.sh) y compila `assembleNormalRelease` para `arm64-v8a`. Firma con [`keystore/release.p12`](keystore/) para que las actualizaciones se instalen encima.
 
 ### Compilar en tu PC (opcional)

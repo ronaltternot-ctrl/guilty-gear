@@ -41,6 +41,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Home screen of the app: pick the game image, choose rendering resolution (up to 4K),
@@ -64,9 +65,13 @@ public class LauncherActivity extends Activity {
 	private static final String K_TOUCH = "touch_controls";
 	private static final String K_BACKEND = "backend";
 	private static final String K_FPS = "show_fps";
+	private static final String K_STYLE = "button_style";
 
 	private static final String BACKEND_VULKAN = "vulkan";
 	private static final String BACKEND_OPENGL = "opengl";
+
+	static final String STYLE_PSP = "psp";
+	static final String STYLE_ARCADE = "arcade";
 
 	/** PSP screen is 480x272; 8x gives 3840x2176 (4K). */
 	private static final int PSP_W = 480;
@@ -98,6 +103,10 @@ public class LauncherActivity extends Activity {
 	private TextView backendOpenGl;
 	private Switch touchSwitch;
 	private Switch fpsSwitch;
+	private TextView stylePsp;
+	private TextView styleArcade;
+	private TextView styleDesc;
+	private ControlsPreviewView controlsPreview;
 	private LinearLayout runningCard;
 	private TextView playButton;
 
@@ -281,20 +290,131 @@ public class LauncherActivity extends Activity {
 		boolean touch = prefs.getBoolean(K_TOUCH, true);
 		boolean fps = prefs.getBoolean(K_FPS, false);
 
-		String ini = "[General]\n"
-			+ "CheckForNewVersion = False\n"
-			+ "[Graphics]\n"
-			+ "InternalResolution = " + res + "\n"
-			+ "GraphicsBackend = " + (vulkan ? 3 : 0) + "\n"
-			+ "iShowStatusFlags = " + (fps ? 2 : 0) + "\n"
-			+ "[Control]\n"
-			+ "ShowTouchControls = " + (touch ? "True" : "False") + "\n"
-			// Fast-forward isn't a PSP button: keep the original PSP layout only.
-			+ "[TouchControls.Landscape]\n"
-			+ "ShowTouchUnthrottle = False\n"
-			+ "[TouchControls.Portrait]\n"
-			+ "ShowTouchUnthrottle = False\n";
-		writeText(configFile(), ini);
+		boolean arcade = STYLE_ARCADE.equals(prefs.getString(K_STYLE, STYLE_PSP));
+
+		StringBuilder ini = new StringBuilder();
+		ini.append("[General]\n")
+			.append("CheckForNewVersion = False\n")
+			.append("[Graphics]\n")
+			.append("InternalResolution = ").append(res).append('\n')
+			.append("GraphicsBackend = ").append(vulkan ? 3 : 0).append('\n')
+			.append("iShowStatusFlags = ").append(fps ? 2 : 0).append('\n')
+			.append("[Control]\n")
+			.append("ShowTouchControls = ").append(touch ? "True" : "False").append('\n');
+		if (arcade) {
+			appendArcadeButtonDefinitions(ini);
+		}
+		ini.append("[TouchControls.Landscape]\n");
+		// Fast-forward isn't a PSP or arcade button: never show it.
+		ini.append("ShowTouchUnthrottle = False\n");
+		appendTouchLayout(ini, arcade);
+		ini.append("[TouchControls.Portrait]\n")
+			.append("ShowTouchUnthrottle = False\n");
+		writeText(configFile(), ini.toString());
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Touch button layouts
+
+	/**
+	 * The game's own PSP mapping: □ = P, ✕ = K, △ = S, ○ = HS, R = Dust, L = Respect.
+	 * Bits follow PPSSPP's CustomKeyData::g_customKeyList order.
+	 */
+	private static final long KEY_SQUARE = 1L;
+	private static final long KEY_TRIANGLE = 1L << 1;
+	private static final long KEY_CIRCLE = 1L << 2;
+	private static final long KEY_CROSS = 1L << 3;
+	private static final long KEY_R = 1L << 11;
+
+	/** Label image indices appended to PPSSPP's customKeyImages (patches/0002). */
+	private static final int IMG_P = 36;
+	private static final int IMG_K = 37;
+	private static final int IMG_S = 38;
+	private static final int IMG_HS = 39;
+	private static final int IMG_D = 40;
+
+	/** One arcade button: label, PSP button it presses, and its spot on screen (fractions). */
+	private static final class ArcadeButton {
+		final int image;
+		final long key;
+		final float x;
+		final float y;
+
+		ArcadeButton(int image, long key, float x, float y) {
+			this.image = image;
+			this.key = key;
+			this.x = x;
+			this.y = y;
+		}
+	}
+
+	/**
+	 * Classic Guilty Gear cabinet panel: K S HS on the top row, P and D on the bottom row
+	 * (the empty middle spot is where the arcade had Respect).
+	 */
+	static final float[][] ARCADE_POSITIONS = {
+		{ 0.745f, 0.575f },  // K
+		{ 0.845f, 0.545f },  // S
+		{ 0.945f, 0.575f },  // HS
+		{ 0.730f, 0.815f },  // P
+		{ 0.930f, 0.815f },  // D
+	};
+
+	private static final ArcadeButton[] ARCADE_BUTTONS = {
+		new ArcadeButton(IMG_K, KEY_CROSS, ARCADE_POSITIONS[0][0], ARCADE_POSITIONS[0][1]),
+		new ArcadeButton(IMG_S, KEY_TRIANGLE, ARCADE_POSITIONS[1][0], ARCADE_POSITIONS[1][1]),
+		new ArcadeButton(IMG_HS, KEY_CIRCLE, ARCADE_POSITIONS[2][0], ARCADE_POSITIONS[2][1]),
+		new ArcadeButton(IMG_P, KEY_SQUARE, ARCADE_POSITIONS[3][0], ARCADE_POSITIONS[3][1]),
+		new ArcadeButton(IMG_D, KEY_R, ARCADE_POSITIONS[4][0], ARCADE_POSITIONS[4][1]),
+	};
+
+	private static final float BUTTON_SCALE = 1.15f;
+
+	private static void appendArcadeButtonDefinitions(StringBuilder ini) {
+		for (int i = 0; i < ARCADE_BUTTONS.length; i++) {
+			ArcadeButton b = ARCADE_BUTTONS[i];
+			ini.append("Custom").append(i).append("Mapping = ")
+				.append(String.format(Locale.ROOT, "0x%016x", b.key)).append('\n')
+				.append("Custom").append(i).append("Image = ").append(b.image).append('\n')
+				.append("Custom").append(i).append("Shape = 0\n")  // Round
+				.append("Custom").append(i).append("Toggle = False\n")
+				.append("Custom").append(i).append("Repeat = False\n");
+		}
+	}
+
+	private static void appendTouchLayout(StringBuilder ini, boolean arcade) {
+		String psp = arcade ? "False" : "True";
+		ini.append("ShowTouchCircle = ").append(psp).append('\n')
+			.append("ShowTouchCross = ").append(psp).append('\n')
+			.append("ShowTouchSquare = ").append(psp).append('\n')
+			.append("ShowTouchTriangle = ").append(psp).append('\n')
+			// In arcade mode R (Dust) becomes the D button. L (Respect) stays.
+			.append("ShowTouchRTrigger = ").append(psp).append('\n');
+		if (arcade) {
+			// Move Start/Select toward the middle so they don't crowd the P button.
+			appendPos(ini, "StartKey", 0.56f, 0.91f, BUTTON_SCALE);
+			appendPos(ini, "SelectKey", 0.44f, 0.91f, BUTTON_SCALE);
+			for (int i = 0; i < ARCADE_BUTTONS.length; i++) {
+				ArcadeButton b = ARCADE_BUTTONS[i];
+				ini.append(String.format(Locale.ROOT, "fcombo%dX = %.4f\n", i, b.x))
+					.append(String.format(Locale.ROOT, "fcombo%dY = %.4f\n", i, b.y))
+					.append(String.format(Locale.ROOT, "comboKeyScale%d = %.4f\n", i, BUTTON_SCALE))
+					.append("ShowComboKey").append(i).append(" = True\n");
+			}
+		} else {
+			// -1 tells PPSSPP to put these back in their default spots.
+			ini.append("StartKeyX = -1.0\nStartKeyY = -1.0\n")
+				.append("SelectKeyX = -1.0\nSelectKeyY = -1.0\n");
+			for (int i = 0; i < ARCADE_BUTTONS.length; i++) {
+				ini.append("ShowComboKey").append(i).append(" = False\n");
+			}
+		}
+	}
+
+	private static void appendPos(StringBuilder ini, String name, float x, float y, float scale) {
+		ini.append(String.format(Locale.ROOT, "%sX = %.4f\n", name, x))
+			.append(String.format(Locale.ROOT, "%sY = %.4f\n", name, y))
+			.append(String.format(Locale.ROOT, "%sScale = %.4f\n", name, scale));
 	}
 
 	private static void writeText(File file, String text) throws IOException {
@@ -420,6 +540,7 @@ public class LauncherActivity extends Activity {
 		refreshGame();
 		refreshResolution();
 		refreshBackend();
+		refreshStyle();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -525,6 +646,20 @@ public class LauncherActivity extends Activity {
 		boolean vulkan = BACKEND_VULKAN.equals(prefs.getString(K_BACKEND, defaultBackend()));
 		styleChip(backendVulkan, vulkan);
 		styleChip(backendOpenGl, !vulkan);
+	}
+
+	private void refreshStyle() {
+		boolean arcade = STYLE_ARCADE.equals(prefs.getString(K_STYLE, STYLE_PSP));
+		styleChip(stylePsp, !arcade);
+		styleChip(styleArcade, arcade);
+		controlsPreview.setArcade(arcade);
+		if (arcade) {
+			styleDesc.setText("Como en la máquina de Guilty Gear: K, S y HS arriba; P y D abajo. "
+				+ "La cruceta, el stick, L (Respeto), Start y Select siguen ahí.");
+		} else {
+			styleDesc.setText("Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. "
+				+ "En este juego: □ = P, ✕ = K, △ = S, ○ = HS, R = D.");
+		}
 	}
 
 	private void refreshRunning() {
@@ -642,10 +777,36 @@ public class LauncherActivity extends Activity {
 
 		// Controls
 		LinearLayout controls = section(col, "CONTROLES");
-		touchSwitch = switchRow(controls, "Botones de PSP en pantalla",
-			"Cruceta, stick, △ ○ ✕ □, L, R, Start y Select, como en la consola. Desactívalo si juegas con un control.");
+		controls.addView(text("Tipo de botones en pantalla", 15, C_TEXT, true));
+		LinearLayout styleRow = new LinearLayout(this);
+		styleRow.setOrientation(LinearLayout.HORIZONTAL);
+		styleRow.setPadding(0, dp(10), 0, dp(10));
+		stylePsp = chip("PSP");
+		stylePsp.setOnClickListener(v -> {
+			prefs.edit().putString(K_STYLE, STYLE_PSP).apply();
+			refreshStyle();
+		});
+		styleArcade = chip("Arcade");
+		styleArcade.setOnClickListener(v -> {
+			prefs.edit().putString(K_STYLE, STYLE_ARCADE).apply();
+			refreshStyle();
+		});
+		styleRow.addView(stylePsp, weighted(0, dp(4)));
+		styleRow.addView(styleArcade, weighted(dp(4), 0));
+		controls.addView(styleRow);
+
+		controlsPreview = new ControlsPreviewView(this);
+		LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		previewParams.bottomMargin = dp(8);
+		controls.addView(controlsPreview, previewParams);
+		styleDesc = text("", 13, C_MUTED, false);
+		styleDesc.setPadding(0, 0, 0, dp(14));
+		controls.addView(styleDesc);
+
+		touchSwitch = switchRow(controls, "Mostrar botones en pantalla",
+			"Desactívalo si juegas con un control Bluetooth o USB.");
 		touchSwitch.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(K_TOUCH, checked).apply());
-		TextView padNote = text("Los controles Bluetooth o USB funcionan solos: A = ✕, B = ○, X = □, Y = △, gatillos L/R, Start y Select. Puedes reasignarlos dentro del juego en Ajustes → Controles.", 13, C_MUTED, false);
+		TextView padNote = text("Los controles funcionan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D y L1 = Respeto. Puedes reasignarlos dentro del juego en Ajustes → Controles.", 13, C_MUTED, false);
 		padNote.setPadding(0, dp(12), 0, 0);
 		controls.addView(padNote);
 
