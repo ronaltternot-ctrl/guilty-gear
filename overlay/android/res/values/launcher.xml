@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<color name="launcher_background">#FF0D0D11</color>
+	<color name="launcher_accent">#FFD7263D</color>
+
+	<style name="LauncherTheme" parent="@android:style/Theme.Material.NoActionBar">
+		<item name="android:windowBackground">@color/launcher_background</item>
+		<item name="android:statusBarColor">@color/launcher_background</item>
+		<item name="android:navigationBarColor">@color/launcher_background</item>
+		<item name="android:colorAccent">@color/launcher_accent</item>
+		<item name="android:colorPrimary">@color/launcher_accent</item>
+		<item name="android:colorPrimaryDark">@color/launcher_background</item>
+	</style>
+</resources>

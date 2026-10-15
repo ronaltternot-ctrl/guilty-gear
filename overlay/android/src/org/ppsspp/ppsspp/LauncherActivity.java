@@ -1,0 +1,838 @@
+package org.ppsspp.ppsspp;
+
+import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.ContentResolver;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.UriPermission;
+import android.content.res.ColorStateList;
+import android.database.Cursor;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Switch;
+import android.widget.TextView;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+/**
+ * Home screen of the app: pick the game image, choose rendering resolution (up to 4K),
+ * controls and graphics options, then boot straight into the game.
+ *
+ * Runs in the main process. The emulator (PpssppActivity) runs in the ":emu" process and is
+ * never initialized here, so this screen stays light and can tell whether a game is open.
+ */
+public class LauncherActivity extends Activity {
+	private static final String TAG = "AcPlusLauncher";
+	private static final int REQUEST_PICK_GAME = 4201;
+
+	private static final String PREFS = "launcher";
+	private static final String K_URI = "game_uri";
+	private static final String K_NAME = "game_name";
+	private static final String K_TITLE = "game_title";
+	private static final String K_ID = "game_id";
+	private static final String K_FORMAT = "game_format";
+	private static final String K_INSPECTED = "game_inspected";
+	private static final String K_RES = "resolution";
+	private static final String K_TOUCH = "touch_controls";
+	private static final String K_BACKEND = "backend";
+	private static final String K_FPS = "show_fps";
+
+	private static final String BACKEND_VULKAN = "vulkan";
+	private static final String BACKEND_OPENGL = "opengl";
+
+	/** PSP screen is 480x272; 8x gives 3840x2176 (4K). */
+	private static final int PSP_W = 480;
+	private static final int PSP_H = 272;
+	private static final int MAX_RES = 8;
+
+	// Palette
+	private static final int C_BG = 0xFF0D0D11;
+	private static final int C_CARD = 0xFF16161C;
+	private static final int C_STROKE = 0xFF272730;
+	private static final int C_ACCENT = 0xFFD7263D;
+	private static final int C_TEXT = 0xFFF2F2F5;
+	private static final int C_MUTED = 0xFF9A9AA8;
+	private static final int C_OK = 0xFF3FB950;
+	private static final int C_WARN = 0xFFE3B341;
+	private static final int C_CHIP_STROKE = 0xFF3A3A46;
+
+	private final Handler handler = new Handler(Looper.getMainLooper());
+	private SharedPreferences prefs;
+	private int recommendedRes;
+	private String inspectingUri;
+
+	private TextView gameStatus;
+	private TextView gameDetail;
+	private final TextView[] resChips = new TextView[MAX_RES];
+	private TextView resInfo;
+	private TextView resHint;
+	private TextView backendVulkan;
+	private TextView backendOpenGl;
+	private Switch touchSwitch;
+	private Switch fpsSwitch;
+	private LinearLayout runningCard;
+	private TextView playButton;
+
+	private final Runnable refreshRunningTask = this::refreshRunning;
+
+	// -------------------------------------------------------------------------------------------
+	// Lifecycle
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+		recommendedRes = computeRecommendedResolution();
+		if (!prefs.contains(K_RES)) {
+			prefs.edit().putInt(K_RES, recommendedRes).apply();
+		}
+		if (!prefs.contains(K_BACKEND)) {
+			prefs.edit().putString(K_BACKEND, defaultBackend()).apply();
+		}
+		setContentView(buildUi());
+	}
+
+	@Override
+	protected void onResume() {
+		super.onResume();
+		refreshAll();
+		// When coming back from a game, the emulator process takes a moment to exit.
+		handler.removeCallbacks(refreshRunningTask);
+		handler.postDelayed(refreshRunningTask, 700);
+	}
+
+	@Override
+	protected void onDestroy() {
+		handler.removeCallbacksAndMessages(null);
+		super.onDestroy();
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		super.onActivityResult(requestCode, resultCode, data);
+		if (requestCode != REQUEST_PICK_GAME || resultCode != RESULT_OK || data == null || data.getData() == null) {
+			return;
+		}
+		Uri uri = data.getData();
+		ContentResolver resolver = getContentResolver();
+		try {
+			resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+		} catch (SecurityException e) {
+			Log.w(TAG, "Could not persist permission for " + uri, e);
+		}
+
+		String old = prefs.getString(K_URI, null);
+		if (old != null && !old.equals(uri.toString())) {
+			try {
+				resolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+			} catch (SecurityException e) {
+				// It was not persisted anymore. Nothing to release.
+			}
+		}
+
+		String name = queryDisplayName(uri);
+		prefs.edit()
+			.putString(K_URI, uri.toString())
+			.putString(K_NAME, name)
+			.remove(K_TITLE)
+			.remove(K_ID)
+			.remove(K_FORMAT)
+			.putBoolean(K_INSPECTED, false)
+			.apply();
+		inspectingUri = null;
+		refreshGame();
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Actions
+
+	private void pickGame() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+		try {
+			startActivityForResult(intent, REQUEST_PICK_GAME);
+		} catch (ActivityNotFoundException e) {
+			showMessage("Sin selector de archivos",
+				"Tu teléfono no tiene un selector de archivos disponible. Instala o activa la app «Archivos» e inténtalo de nuevo.");
+		}
+	}
+
+	private void onPlayPressed() {
+		if (findEmuPid() > 0) {
+			resumeGame();
+			return;
+		}
+		String stored = prefs.getString(K_URI, null);
+		if (stored == null) {
+			pickGame();
+			return;
+		}
+		Uri uri = Uri.parse(stored);
+		if (!hasReadAccess(uri) || !canOpen(uri)) {
+			new AlertDialog.Builder(this)
+				.setTitle("No encuentro el juego")
+				.setMessage("No puedo abrir el archivo que elegiste. Puede que se haya movido o borrado. Elígelo de nuevo.")
+				.setPositiveButton("Elegir archivo", (d, w) -> pickGame())
+				.setNegativeButton("Cancelar", null)
+				.show();
+			return;
+		}
+		try {
+			writeEmulatorConfig();
+		} catch (IOException e) {
+			Log.e(TAG, "Failed to write config", e);
+			showMessage("Error", "No se pudo preparar la configuración del juego: " + e.getMessage());
+			return;
+		}
+		startActivity(emulatorIntent(uri));
+	}
+
+	private void resumeGame() {
+		String stored = prefs.getString(K_URI, null);
+		Intent intent = emulatorIntent(stored == null ? null : Uri.parse(stored));
+		startActivity(intent);
+	}
+
+	private void confirmCloseGame() {
+		new AlertDialog.Builder(this)
+			.setTitle("¿Cerrar la partida?")
+			.setMessage("Se cerrará el juego abierto. Lo que no hayas guardado se perderá.")
+			.setPositiveButton("Cerrar partida", (d, w) -> {
+				int pid = findEmuPid();
+				if (pid > 0) {
+					android.os.Process.killProcess(pid);
+				}
+				handler.removeCallbacks(refreshRunningTask);
+				handler.postDelayed(refreshRunningTask, 400);
+			})
+			.setNegativeButton("Cancelar", null)
+			.show();
+	}
+
+	private Intent emulatorIntent(Uri game) {
+		Intent intent = new Intent();
+		intent.setClassName(getPackageName(), LaunchContract.EMU_ACTIVITY);
+		intent.putExtra(LaunchContract.EXTRA_FROM_LAUNCHER, true);
+		intent.putExtra(LaunchContract.EXTRA_FLAGS,
+			"--pause-menu-exit \"--appendconfig=" + configFile().getAbsolutePath() + "\"");
+		if (game != null) {
+			intent.putExtra(LaunchContract.EXTRA_GAME, game.toString());
+		}
+		return intent;
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Emulator configuration
+
+	private File configFile() {
+		return new File(getFilesDir(), "launcher.ini");
+	}
+
+	/**
+	 * Points the emulator's memory stick at app storage (so it never asks for a folder) and
+	 * writes the settings chosen here as an ini that PPSSPP applies on top of its own config.
+	 */
+	private void writeEmulatorConfig() throws IOException {
+		File memstick = getExternalFilesDir(null);
+		if (memstick == null) {
+			memstick = new File(getFilesDir(), "memstick");
+		}
+		String[] dirs = { "PSP/SYSTEM", "PSP/SAVEDATA", "PSP/PPSSPP_STATE", "PSP/GAME" };
+		for (String dir : dirs) {
+			File f = new File(memstick, dir);
+			if (!f.isDirectory() && !f.mkdirs()) {
+				throw new IOException("No se pudo crear " + f.getAbsolutePath());
+			}
+		}
+		writeText(new File(getFilesDir(), "memstick_dir.txt"), memstick.getAbsolutePath());
+
+		int res = clampRes(prefs.getInt(K_RES, recommendedRes));
+		boolean vulkan = BACKEND_VULKAN.equals(prefs.getString(K_BACKEND, defaultBackend()));
+		boolean touch = prefs.getBoolean(K_TOUCH, true);
+		boolean fps = prefs.getBoolean(K_FPS, false);
+
+		String ini = "[General]\n"
+			+ "CheckForNewVersion = False\n"
+			+ "[Graphics]\n"
+			+ "InternalResolution = " + res + "\n"
+			+ "GraphicsBackend = " + (vulkan ? 3 : 0) + "\n"
+			+ "iShowStatusFlags = " + (fps ? 2 : 0) + "\n"
+			+ "[Control]\n"
+			+ "ShowTouchControls = " + (touch ? "True" : "False") + "\n"
+			// Fast-forward isn't a PSP button: keep the original PSP layout only.
+			+ "[TouchControls.Landscape]\n"
+			+ "ShowTouchUnthrottle = False\n"
+			+ "[TouchControls.Portrait]\n"
+			+ "ShowTouchUnthrottle = False\n";
+		writeText(configFile(), ini);
+	}
+
+	private static void writeText(File file, String text) throws IOException {
+		File tmp = new File(file.getPath() + ".tmp");
+		try (OutputStream out = new FileOutputStream(tmp)) {
+			out.write(text.getBytes(StandardCharsets.UTF_8));
+		}
+		if (!tmp.renameTo(file)) {
+			// renameTo can fail if the target exists on some filesystems.
+			if (!file.delete() || !tmp.renameTo(file)) {
+				throw new IOException("No se pudo escribir " + file.getName());
+			}
+		}
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// State helpers
+
+	private int findEmuPid() {
+		ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+		if (am == null) {
+			return -1;
+		}
+		List<ActivityManager.RunningAppProcessInfo> processes = am.getRunningAppProcesses();
+		if (processes == null) {
+			return -1;
+		}
+		String name = getPackageName() + LaunchContract.EMU_PROCESS_SUFFIX;
+		for (ActivityManager.RunningAppProcessInfo p : processes) {
+			if (name.equals(p.processName)) {
+				return p.pid;
+			}
+		}
+		return -1;
+	}
+
+	private boolean hasReadAccess(Uri uri) {
+		if (!"content".equals(uri.getScheme())) {
+			return true;
+		}
+		for (UriPermission p : getContentResolver().getPersistedUriPermissions()) {
+			if (p.getUri().equals(uri) && p.isReadPermission()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean canOpen(Uri uri) {
+		try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r")) {
+			return pfd != null;
+		} catch (Exception e) {
+			Log.w(TAG, "Cannot open " + uri, e);
+			return false;
+		}
+	}
+
+	private String queryDisplayName(Uri uri) {
+		try (Cursor c = getContentResolver().query(uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+			if (c != null && c.moveToFirst() && !c.isNull(0)) {
+				return c.getString(0);
+			}
+		} catch (Exception e) {
+			Log.w(TAG, "Could not query name for " + uri, e);
+		}
+		String last = uri.getLastPathSegment();
+		return last != null ? last : "juego";
+	}
+
+	@SuppressWarnings("deprecation")
+	private int computeRecommendedResolution() {
+		DisplayMetrics dm = new DisplayMetrics();
+		getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+		int longSide = Math.max(dm.widthPixels, dm.heightPixels);
+		return Math.max(2, Math.min(MAX_RES, Math.round(longSide / (float) PSP_W)));
+	}
+
+	private static String defaultBackend() {
+		// Same rule PPSSPP uses: Vulkan on Android 8.1+ with a 64-bit CPU.
+		boolean is64 = Build.SUPPORTED_64_BIT_ABIS != null && Build.SUPPORTED_64_BIT_ABIS.length > 0;
+		return (Build.VERSION.SDK_INT >= 27 && is64) ? BACKEND_VULKAN : BACKEND_OPENGL;
+	}
+
+	private static int clampRes(int r) {
+		return Math.max(1, Math.min(MAX_RES, r));
+	}
+
+	private void startInspection(final Uri uri) {
+		final String key = uri.toString();
+		if (key.equals(inspectingUri)) {
+			return;
+		}
+		inspectingUri = key;
+		new Thread(() -> {
+			GameInspector.Result result;
+			try {
+				result = GameInspector.inspect(getApplicationContext(), uri);
+			} catch (Throwable t) {
+				Log.w(TAG, "Inspection failed", t);
+				result = new GameInspector.Result(null, null, null);
+			}
+			final GameInspector.Result r = result;
+			handler.post(() -> {
+				if (isFinishing() || isDestroyed() || !key.equals(prefs.getString(K_URI, null))) {
+					return;
+				}
+				prefs.edit()
+					.putString(K_TITLE, r.title)
+					.putString(K_ID, r.discId)
+					.putString(K_FORMAT, r.format)
+					.putBoolean(K_INSPECTED, true)
+					.apply();
+				inspectingUri = null;
+				refreshGame();
+			});
+		}, "GameInspector").start();
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Refreshing the UI from preferences
+
+	private void refreshAll() {
+		refreshGame();
+		refreshResolution();
+		refreshBackend();
+		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
+		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
+		refreshRunning();
+	}
+
+	private void refreshGame() {
+		String stored = prefs.getString(K_URI, null);
+		if (stored == null) {
+			gameStatus.setText("Elige tu copia del juego");
+			gameStatus.setTextColor(C_TEXT);
+			gameDetail.setText("Archivo ISO o CSO de Guilty Gear XX ΛCore Plus para PSP. Guárdalo en la memoria del teléfono o en la microSD, no en la nube.");
+			refreshPlayLabel();
+			return;
+		}
+		Uri uri = Uri.parse(stored);
+		String name = prefs.getString(K_NAME, "juego");
+		if (!hasReadAccess(uri)) {
+			gameStatus.setText("⚠ No tengo acceso al archivo");
+			gameStatus.setTextColor(C_WARN);
+			gameDetail.setText(name + "\nVuelve a elegirlo con el botón de abajo.");
+			refreshPlayLabel();
+			return;
+		}
+		if (!prefs.getBoolean(K_INSPECTED, false)) {
+			gameStatus.setText("Comprobando el archivo…");
+			gameStatus.setTextColor(C_MUTED);
+			gameDetail.setText(name);
+			startInspection(uri);
+			refreshPlayLabel();
+			return;
+		}
+
+		GameInspector.Result r = new GameInspector.Result(
+			prefs.getString(K_FORMAT, null), prefs.getString(K_ID, null), prefs.getString(K_TITLE, null));
+		String id = r.prettyDiscId();
+		String format = r.format != null ? r.format : "archivo";
+		StringBuilder detail = new StringBuilder();
+		if (id != null) {
+			detail.append(id).append(" · ");
+		}
+		detail.append(format).append(" · ").append(name);
+
+		switch (r.match()) {
+			case TARGET:
+				gameStatus.setText("✓ " + r.title);
+				gameStatus.setTextColor(C_OK);
+				break;
+			case OTHER_GUILTY_GEAR:
+				gameStatus.setText("⚠ Otro Guilty Gear: " + r.title);
+				gameStatus.setTextColor(C_WARN);
+				detail.append("\nEsta app está pensada para ΛCore Plus, pero puedes intentarlo.");
+				break;
+			case OTHER_GAME:
+				gameStatus.setText("⚠ Este archivo es «" + r.title + "»");
+				gameStatus.setTextColor(C_WARN);
+				detail.append("\nEsta app está pensada para Guilty Gear XX ΛCore Plus, pero puedes intentarlo.");
+				break;
+			case UNKNOWN:
+			default:
+				gameStatus.setText("Archivo listo");
+				gameStatus.setTextColor(C_TEXT);
+				detail.append("\nNo pude identificar el juego dentro del archivo, pero puedes intentarlo.");
+				break;
+		}
+		gameDetail.setText(detail.toString());
+		refreshPlayLabel();
+	}
+
+	private void refreshResolution() {
+		int res = clampRes(prefs.getInt(K_RES, recommendedRes));
+		for (int i = 0; i < MAX_RES; i++) {
+			styleChip(resChips[i], i + 1 == res);
+		}
+		resInfo.setText((PSP_W * res) + " × " + (PSP_H * res) + resolutionTag(res));
+		String hint;
+		if (res == 1) {
+			hint = "Resolución original de la PSP. Máximo rendimiento, imagen más pixelada.";
+		} else if (res <= 3) {
+			hint = "Más nítido y muy ligero. Va bien en casi cualquier teléfono.";
+		} else if (res == 4) {
+			hint = "Full HD. Buen equilibrio para la mayoría de teléfonos.";
+		} else if (res <= 6) {
+			hint = "Muy nítido. Ideal para teléfonos de gama media-alta.";
+		} else {
+			hint = "Ultra, hasta 4K. Necesita un teléfono potente: si notas lentitud, baja un nivel.";
+		}
+		hint += "\nRecomendada para tu pantalla: " + recommendedRes + "×.";
+		resHint.setText(hint);
+	}
+
+	private static String resolutionTag(int res) {
+		switch (res) {
+			case 1: return " · PSP original";
+			case 3: return " · ~720p";
+			case 4: return " · ~1080p";
+			case 6: return " · ~1440p";
+			case 8: return " · 4K";
+			default: return "";
+		}
+	}
+
+	private void refreshBackend() {
+		boolean vulkan = BACKEND_VULKAN.equals(prefs.getString(K_BACKEND, defaultBackend()));
+		styleChip(backendVulkan, vulkan);
+		styleChip(backendOpenGl, !vulkan);
+	}
+
+	private void refreshRunning() {
+		if (runningCard == null) {
+			return;
+		}
+		boolean running = findEmuPid() > 0;
+		runningCard.setVisibility(running ? View.VISIBLE : View.GONE);
+		refreshPlayLabel();
+	}
+
+	private void refreshPlayLabel() {
+		if (playButton == null) {
+			return;
+		}
+		if (findEmuPid() > 0) {
+			playButton.setText("CONTINUAR PARTIDA");
+		} else if (prefs.getString(K_URI, null) == null) {
+			playButton.setText("ELEGIR JUEGO");
+		} else {
+			playButton.setText("JUGAR");
+		}
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// UI construction (plain Android views, no XML layouts)
+
+	private View buildUi() {
+		final ScrollView scroll = new ScrollView(this);
+		scroll.setBackgroundColor(C_BG);
+		scroll.setFillViewport(true);
+		if (Build.VERSION.SDK_INT >= 35) {
+			// Android 15+ draws apps edge-to-edge; keep content clear of the system bars.
+			scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+				applyInsets(v, insets);
+				return insets;
+			});
+		}
+
+		FrameLayout center = new FrameLayout(this);
+		scroll.addView(center, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+		LinearLayout col = new LinearLayout(this);
+		col.setOrientation(LinearLayout.VERTICAL);
+		col.setPadding(dp(20), dp(24), dp(20), dp(28));
+		int screenDp = (int) (getResources().getDisplayMetrics().widthPixels / getResources().getDisplayMetrics().density);
+		int width = screenDp > 680 ? dp(640) : ViewGroup.LayoutParams.MATCH_PARENT;
+		center.addView(col, new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+
+		// Header
+		TextView kicker = text("GUILTY GEAR XX", 13, C_ACCENT, true);
+		kicker.setLetterSpacing(0.3f);
+		col.addView(kicker);
+		TextView title = text("ΛCORE PLUS", 38, C_TEXT, true);
+		title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+		title.setLetterSpacing(0.02f);
+		col.addView(title);
+		TextView subtitle = text("Edición PSP · listo para jugar en Android", 14, C_MUTED, false);
+		col.addView(subtitle);
+
+		// Running game banner
+		runningCard = card(C_WARN);
+		runningCard.setVisibility(View.GONE);
+		runningCard.addView(text("Partida en curso", 16, C_TEXT, true));
+		TextView runningText = text("El juego sigue abierto en segundo plano. Los cambios de abajo se aplican la próxima vez que lo inicies.", 13, C_MUTED, false);
+		runningText.setPadding(0, dp(4), 0, dp(12));
+		runningCard.addView(runningText);
+		LinearLayout runningRow = new LinearLayout(this);
+		runningRow.setOrientation(LinearLayout.HORIZONTAL);
+		TextView resume = filledButton("Continuar", 15);
+		resume.setOnClickListener(v -> resumeGame());
+		TextView close = outlineButton("Cerrar partida");
+		close.setOnClickListener(v -> confirmCloseGame());
+		runningRow.addView(resume, weighted(0, dp(6)));
+		runningRow.addView(close, weighted(dp(6), 0));
+		runningCard.addView(runningRow);
+		col.addView(runningCard, cardParams());
+
+		// Game
+		LinearLayout game = section(col, "JUEGO");
+		gameStatus = text("", 17, C_TEXT, true);
+		game.addView(gameStatus);
+		gameDetail = text("", 13, C_MUTED, false);
+		gameDetail.setPadding(0, dp(4), 0, dp(14));
+		game.addView(gameDetail);
+		TextView pick = outlineButton("Elegir archivo ISO / CSO");
+		pick.setOnClickListener(v -> pickGame());
+		game.addView(pick, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+		// Resolution
+		LinearLayout resolution = section(col, "RESOLUCIÓN DE RENDERIZADO");
+		for (int row = 0; row < 2; row++) {
+			LinearLayout chips = new LinearLayout(this);
+			chips.setOrientation(LinearLayout.HORIZONTAL);
+			for (int c = 0; c < 4; c++) {
+				final int level = row * 4 + c + 1;
+				TextView chip = chip(level + "×");
+				chip.setOnClickListener(v -> {
+					prefs.edit().putInt(K_RES, level).apply();
+					refreshResolution();
+				});
+				resChips[level - 1] = chip;
+				LinearLayout.LayoutParams lp = weighted(c == 0 ? 0 : dp(4), c == 3 ? 0 : dp(4));
+				lp.bottomMargin = dp(8);
+				chips.addView(chip, lp);
+			}
+			resolution.addView(chips);
+		}
+		resInfo = text("", 18, C_TEXT, true);
+		resInfo.setPadding(0, dp(6), 0, 0);
+		resolution.addView(resInfo);
+		resHint = text("", 13, C_MUTED, false);
+		resHint.setPadding(0, dp(4), 0, 0);
+		resolution.addView(resHint);
+
+		// Controls
+		LinearLayout controls = section(col, "CONTROLES");
+		touchSwitch = switchRow(controls, "Botones de PSP en pantalla",
+			"Cruceta, stick, △ ○ ✕ □, L, R, Start y Select, como en la consola. Desactívalo si juegas con un control.");
+		touchSwitch.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(K_TOUCH, checked).apply());
+		TextView padNote = text("Los controles Bluetooth o USB funcionan solos: A = ✕, B = ○, X = □, Y = △, gatillos L/R, Start y Select. Puedes reasignarlos dentro del juego en Ajustes → Controles.", 13, C_MUTED, false);
+		padNote.setPadding(0, dp(12), 0, 0);
+		controls.addView(padNote);
+
+		// Graphics
+		LinearLayout graphics = section(col, "GRÁFICOS");
+		graphics.addView(text("Motor gráfico", 15, C_TEXT, true));
+		LinearLayout backendRow = new LinearLayout(this);
+		backendRow.setOrientation(LinearLayout.HORIZONTAL);
+		backendRow.setPadding(0, dp(10), 0, dp(6));
+		backendVulkan = chip("Vulkan");
+		backendVulkan.setOnClickListener(v -> {
+			prefs.edit().putString(K_BACKEND, BACKEND_VULKAN).apply();
+			refreshBackend();
+		});
+		backendOpenGl = chip("OpenGL");
+		backendOpenGl.setOnClickListener(v -> {
+			prefs.edit().putString(K_BACKEND, BACKEND_OPENGL).apply();
+			refreshBackend();
+		});
+		backendRow.addView(backendVulkan, weighted(0, dp(4)));
+		backendRow.addView(backendOpenGl, weighted(dp(4), 0));
+		graphics.addView(backendRow);
+		graphics.addView(text("Vulkan suele rendir mejor en los súper ataques llenos de efectos. Si ves fallos gráficos, prueba OpenGL.", 13, C_MUTED, false));
+		View spacer = new View(this);
+		graphics.addView(spacer, new LinearLayout.LayoutParams(1, dp(14)));
+		fpsSwitch = switchRow(graphics, "Mostrar FPS", "Contador de fotogramas por segundo en una esquina.");
+		fpsSwitch.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(K_FPS, checked).apply());
+
+		// Play
+		playButton = filledButton("JUGAR", 20);
+		playButton.setLetterSpacing(0.15f);
+		playButton.setPadding(dp(16), dp(18), dp(16), dp(18));
+		playButton.setOnClickListener(v -> onPlayPressed());
+		LinearLayout.LayoutParams playParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		playParams.topMargin = dp(22);
+		col.addView(playButton, playParams);
+
+		TextView tip = text("En el juego, el botón Atrás (o el icono de pausa) abre el menú: guardar o cargar estado, ajustes y salir.", 13, C_MUTED, false);
+		tip.setGravity(Gravity.CENTER_HORIZONTAL);
+		tip.setPadding(dp(8), dp(14), dp(8), 0);
+		col.addView(tip);
+
+		TextView footer = text("Necesitas tu propia copia del juego. Emulación con PPSSPP (licencia GPL 2.0 o posterior).", 11, 0xFF6C6C78, false);
+		footer.setGravity(Gravity.CENTER_HORIZONTAL);
+		footer.setPadding(dp(8), dp(18), dp(8), 0);
+		col.addView(footer);
+
+		return scroll;
+	}
+
+	@SuppressWarnings("deprecation")
+	private static void applyInsets(View v, WindowInsets insets) {
+		v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+			insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+	}
+
+	private LinearLayout section(LinearLayout parent, String title) {
+		LinearLayout card = card(C_STROKE);
+		TextView label = text(title, 12, C_MUTED, true);
+		label.setLetterSpacing(0.18f);
+		label.setPadding(0, 0, 0, dp(10));
+		card.addView(label);
+		parent.addView(card, cardParams());
+		return card;
+	}
+
+	private LinearLayout card(int strokeColor) {
+		LinearLayout card = new LinearLayout(this);
+		card.setOrientation(LinearLayout.VERTICAL);
+		card.setPadding(dp(16), dp(16), dp(16), dp(16));
+		GradientDrawable bg = new GradientDrawable();
+		bg.setColor(C_CARD);
+		bg.setCornerRadius(dp(16));
+		bg.setStroke(dp(1), strokeColor);
+		card.setBackground(bg);
+		return card;
+	}
+
+	private LinearLayout.LayoutParams cardParams() {
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(16);
+		return lp;
+	}
+
+	private Switch switchRow(LinearLayout parent, String title, String description) {
+		LinearLayout row = new LinearLayout(this);
+		row.setOrientation(LinearLayout.HORIZONTAL);
+		row.setGravity(Gravity.CENTER_VERTICAL);
+		LinearLayout texts = new LinearLayout(this);
+		texts.setOrientation(LinearLayout.VERTICAL);
+		texts.addView(text(title, 15, C_TEXT, true));
+		TextView desc = text(description, 13, C_MUTED, false);
+		desc.setPadding(0, dp(2), dp(12), 0);
+		texts.addView(desc);
+		row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		Switch sw = new Switch(this);
+		if (Build.VERSION.SDK_INT >= 23) {
+			int[][] states = { { android.R.attr.state_checked }, {} };
+			sw.setThumbTintList(new ColorStateList(states, new int[] { C_ACCENT, 0xFFBDBDC6 }));
+			sw.setTrackTintList(new ColorStateList(states, new int[] { 0x99D7263D, 0xFF4A4A55 }));
+		}
+		row.addView(sw);
+		// Tapping anywhere on the row toggles the switch.
+		row.setOnClickListener(v -> sw.toggle());
+		parent.addView(row);
+		return sw;
+	}
+
+	private TextView text(String s, float sp, int color, boolean bold) {
+		TextView t = new TextView(this);
+		t.setText(s);
+		t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+		t.setTextColor(color);
+		if (bold) {
+			t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+		}
+		t.setLineSpacing(0, 1.12f);
+		return t;
+	}
+
+	private TextView filledButton(String label, float sp) {
+		TextView b = text(label, sp, Color.WHITE, true);
+		b.setGravity(Gravity.CENTER);
+		b.setPadding(dp(16), dp(12), dp(16), dp(12));
+		b.setBackground(ripple(C_ACCENT, 0, 14));
+		makeClickable(b);
+		return b;
+	}
+
+	private TextView outlineButton(String label) {
+		TextView b = text(label, 15, C_TEXT, true);
+		b.setGravity(Gravity.CENTER);
+		b.setPadding(dp(16), dp(12), dp(16), dp(12));
+		b.setBackground(ripple(Color.TRANSPARENT, C_CHIP_STROKE, 14));
+		makeClickable(b);
+		return b;
+	}
+
+	private TextView chip(String label) {
+		TextView c = text(label, 16, C_MUTED, true);
+		c.setGravity(Gravity.CENTER);
+		c.setPadding(dp(4), dp(11), dp(4), dp(11));
+		makeClickable(c);
+		styleChip(c, false);
+		return c;
+	}
+
+	private void styleChip(TextView chip, boolean selected) {
+		chip.setBackground(selected ? ripple(C_ACCENT, 0, 12) : ripple(Color.TRANSPARENT, C_CHIP_STROKE, 12));
+		chip.setTextColor(selected ? Color.WHITE : C_MUTED);
+		chip.setSelected(selected);
+	}
+
+	private static void makeClickable(View v) {
+		v.setClickable(true);
+		v.setFocusable(true);
+	}
+
+	private Drawable ripple(int fill, int stroke, float radiusDp) {
+		GradientDrawable shape = new GradientDrawable();
+		shape.setColor(fill);
+		shape.setCornerRadius(dp(radiusDp));
+		if (stroke != 0) {
+			shape.setStroke(dp(1.5f), stroke);
+		}
+		GradientDrawable mask = new GradientDrawable();
+		mask.setColor(Color.WHITE);
+		mask.setCornerRadius(dp(radiusDp));
+		return new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), shape, mask);
+	}
+
+	private LinearLayout.LayoutParams weighted(int leftMargin, int rightMargin) {
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+		lp.leftMargin = leftMargin;
+		lp.rightMargin = rightMargin;
+		return lp;
+	}
+
+	private int dp(float v) {
+		return Math.round(v * getResources().getDisplayMetrics().density);
+	}
+
+	private void showMessage(String title, String message) {
+		new AlertDialog.Builder(this)
+			.setTitle(title)
+			.setMessage(message)
+			.setPositiveButton("Aceptar", null)
+			.show();
+	}
+}

@@ -1,0 +1,114 @@
+name: Compilar APK
+
+on:
+  # Botón "Run workflow" en la pestaña Actions.
+  workflow_dispatch:
+    inputs:
+      abis:
+        description: 'Arquitecturas: arm64-v8a sirve para casi todos los teléfonos. Para teléfonos viejos de 32 bits usa arm64-v8a,armeabi-v7a'
+        required: false
+        default: 'arm64-v8a'
+  # También compila sola cada vez que cambias algo del proyecto.
+  push:
+    branches: [ main ]
+    paths-ignore: [ '**.md' ]
+
+permissions:
+  contents: write   # para publicar el APK en "Releases"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: APK para Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      ABIS: ${{ github.event.inputs.abis || 'arm64-v8a' }}
+      KEYSTORE_PASSWORD: acplus-launcher
+      KEY_ALIAS: acplus
+
+    steps:
+      - name: Descargar este proyecto
+        uses: actions/checkout@v6
+
+      - name: Liberar espacio en disco
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/node_modules "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Preparar el código de PPSSPP con los cambios del lanzador
+        run: bash scripts/prepare.sh "$GITHUB_WORKSPACE/build/ppsspp"
+
+      - name: Configurar Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Caché de Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('PPSSPP_VERSION') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Caché de compilación C++
+        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+        with:
+          key: android-${{ env.ABIS }}-${{ hashFiles('PPSSPP_VERSION') }}
+          max-size: 2G
+
+      - name: Compilar el APK
+        working-directory: build/ppsspp
+        run: |
+          # Keep Gradle's memory within what GitHub's machines have.
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC" >> ~/.gradle/gradle.properties
+          export CCACHE_COMPILERCHECK=content
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          ./gradlew assembleNormalRelease --stacktrace --no-daemon \
+            -PLAUNCHER_ABIS="$ABIS" \
+            -PRELEASE_STORE_FILE="$GITHUB_WORKSPACE/keystore/release.p12" \
+            -PRELEASE_STORE_PASSWORD="$KEYSTORE_PASSWORD" \
+            -PRELEASE_KEY_ALIAS="$KEY_ALIAS" \
+            -PRELEASE_KEY_PASSWORD="$KEYSTORE_PASSWORD" \
+            -PANDROID_VERSION_CODE="$VERSION_CODE" \
+            -PANDROID_VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+
+      - name: Reunir el APK
+        id: apk
+        run: |
+          mkdir -p out
+          APK="$(find build/ppsspp/android/build/outputs/apk -name '*.apk' | head -n 1)"
+          if [ -z "$APK" ]; then echo "No se generó ningún APK"; exit 1; fi
+          NAME="GGXX-ACPlus-Android-v1.0.${GITHUB_RUN_NUMBER}.apk"
+          cp "$APK" "out/$NAME"
+          ls -la out
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "ppsspp=$(tr -d ' \r\n' < PPSSPP_VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar el APK como artefacto
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: out/*.apk
+          retention-days: 30
+
+      - name: Publicar en Releases (para descargarlo desde el teléfono)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: GGXX AC+ para Android · versión 1.0.${{ github.run_number }}
+          make_latest: true
+          files: out/*.apk
+          body: |
+            Descarga el archivo **.apk** de abajo en tu teléfono e instálalo.
+
+            - Motor de emulación: PPSSPP ${{ steps.apk.outputs.ppsspp }}.
+            - Arquitecturas incluidas: `${{ env.ABIS }}`.
+            - El juego no viene incluido: la app te pide tu copia (ISO o CSO) la primera vez.

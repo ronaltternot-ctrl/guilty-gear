@@ -1,0 +1,256 @@
+diff --git a/android/AndroidManifest.xml b/android/AndroidManifest.xml
+index 8bdf525..5be2a8b 100644
+--- a/android/AndroidManifest.xml
++++ b/android/AndroidManifest.xml
+@@ -50,70 +50,37 @@
+         android:requestLegacyExternalStorage="true"
+         android:preserveLegacyExternalStorage="true">
+         <meta-data android:name="android.max_aspect" android:value="2.4" />
++        <!-- Launcher home screen: pick the game, resolution, controls. -->
+         <activity
+-            android:name=".PpssppActivity"
+-            android:configChanges="locale|keyboard|keyboardHidden|navigation|uiMode"
+-            android:theme="@style/ppsspp_style"
+-			android:launchMode="singleInstance"
++            android:name=".LauncherActivity"
++            android:theme="@style/LauncherTheme"
++            android:label="@string/app_name"
+             android:exported="true">
+-            <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+ 
+                 <category android:name="android.intent.category.LAUNCHER" />
+                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+             </intent-filter>
+-            <intent-filter>
+-                <action android:name="android.intent.action.VIEW" />
+-                <category android:name="android.intent.category.DEFAULT" />
+-                <category android:name="android.intent.category.BROWSABLE" />
+-                <data android:scheme="file" />
+-                <data android:scheme="content" />
+-                <data android:mimeType="*/*" />
+-                <data android:host="*" />
+-                <data android:pathPattern=".*\\.iso" />
+-                <data android:pathPattern=".*\\..*\\.iso" />
+-                <data android:pathPattern=".*\\..*\\..*\\.iso" />
+-                <data android:pathPattern=".*\\.cso" />
+-                <data android:pathPattern=".*\\..*\\.cso" />
+-                <data android:pathPattern=".*\\..*\\..*\\.cso" />
+-                <data android:pathPattern=".*\\.chd" />
+-                <data android:pathPattern=".*\\..*\\.chd" />
+-                <data android:pathPattern=".*\\..*\\..*\\.chd" />
+-                <data android:pathPattern=".*\\.elf" />
+-                <data android:pathPattern=".*\\..*\\.elf" />
+-                <data android:pathPattern=".*\\..*\\..*\\.elf" />
+-                <data android:pathPattern=".*\\.ISO" />
+-                <data android:pathPattern=".*\\..*\\.ISO" />
+-                <data android:pathPattern=".*\\..*\\..*\\.ISO" />
+-                <data android:pathPattern=".*\\.CSO" />
+-                <data android:pathPattern=".*\\..*\\.CSO" />
+-                <data android:pathPattern=".*\\..*\\..*\\.CSO" />
+-                <data android:pathPattern=".*\\.ELF" />
+-                <data android:pathPattern=".*\\..*\\.ELF" />
+-                <data android:pathPattern=".*\\..*\\..*\\.ELF" />
+-                <data android:pathPattern=".*\\.CHD" />
+-                <data android:pathPattern=".*\\..*\\.CHD" />
+-                <data android:pathPattern=".*\\..*\\..*\\.CHD" />
+-                <data android:pathPattern=".*\\.ppdmp" />
+-                <data android:pathPattern=".*\\.pbp" />
+-            </intent-filter>
+         </activity>
+-        <meta-data android:name="isGame" android:value="true" />
++        <!-- The emulator runs in its own process, so closing the game ends it cleanly
++             and the launcher can tell whether a game is still open. -->
+         <activity
+-            android:name=".ShortcutActivity"
+-            android:label="@string/shortcut_name"
+-            android:exported="true">
+-            <intent-filter>
+-                <category android:name="android.intent.category.DEFAULT" />
+-
+-                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+-            </intent-filter>
++            android:name=".PpssppActivity"
++            android:process=":emu"
++            android:configChanges="locale|keyboard|keyboardHidden|navigation|uiMode"
++            android:theme="@style/ppsspp_style"
++			android:launchMode="singleInstance"
++            android:exported="false">
++            <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
+         </activity>
++        <meta-data android:name="isGame" android:value="true" />
+ 		<activity android:name=".ImageResultProxyActivity"
++			android:process=":emu"
+ 			android:theme="@style/Theme.ProxyTransparent"
+ 			android:launchMode="standard" />
+ 		<activity android:name=".DocumentResultProxyActivity"
++			android:process=":emu"
+ 			android:theme="@style/Theme.ProxyTransparent"
+ 			android:launchMode="standard" />
+         <profileable android:shell="true" android:enabled="true" />
+diff --git a/android/build.gradle.kts b/android/build.gradle.kts
+index acf53a5..688f5b3 100644
+--- a/android/build.gradle.kts
++++ b/android/build.gradle.kts
+@@ -116,6 +116,9 @@ android {
+ 
+ 	lint {
+ 		baseline = file("lint-baseline.xml")
++		// Launcher build: don't fail CI on lint, the native build is the slow, important part.
++		checkReleaseBuilds = false
++		abortOnError = false
+ 	}
+ 
+ 	defaultConfig {
+@@ -191,7 +194,8 @@ android {
+ 	}
+ 	productFlavors {
+ 		create("normal") {
+-			applicationId = "org.ppsspp.ppsspp"
++			// Own package name, so it installs next to a regular PPSSPP without conflicts.
++			applicationId = (project.findProperty("LAUNCHER_APP_ID") as String?) ?: "com.acplus.psplauncher"
+ 			dimension = "variant"
+ 			externalNativeBuild {
+ 				cmake {
+@@ -206,8 +210,10 @@ android {
+ 				}
+ 			}
+ 			ndk {
+-				abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
+-				// debugSymbolLevel = "FULL"  // These don't actually help much in the Google Play crash report. We do still have symbols locally.
++				// Default to 64-bit ARM only (any phone able to render this game at high resolution).
++				// Override with -PLAUNCHER_ABIS=arm64-v8a,armeabi-v7a
++				val launcherAbis = (project.findProperty("LAUNCHER_ABIS") as String?) ?: "arm64-v8a"
++				abiFilters.addAll(launcherAbis.split(",").map { it.trim() }.filter { it.isNotEmpty() })
+ 			}
+ 		}
+ 		create("gold") {
+diff --git a/android/res/values/strings.xml b/android/res/values/strings.xml
+index 0d625d0..53f0dd4 100644
+--- a/android/res/values/strings.xml
++++ b/android/res/values/strings.xml
+@@ -1,7 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+ 
+-    <string name="app_name">PPSSPP</string>
++    <string name="app_name">GGXX AC+</string>
+     <string name="shortcut_name">PPSSPP game</string>
+ 
+ </resources>
+diff --git a/android/src/org/ppsspp/ppsspp/PpssppActivity.java b/android/src/org/ppsspp/ppsspp/PpssppActivity.java
+index 62caaa4..7b052c5 100644
+--- a/android/src/org/ppsspp/ppsspp/PpssppActivity.java
++++ b/android/src/org/ppsspp/ppsspp/PpssppActivity.java
+@@ -168,6 +168,14 @@ public class PpssppActivity extends AppCompatActivity implements SensorEventList
+ 	// Key used for debugging.
+ 	public static final String ARGS_EXTRA_KEY = "org.ppsspp.ppsspp.Args";
+ 
++	// Dedicated launcher mode (see LauncherActivity). When started from the launcher, we boot
++	// straight into the chosen game, and the ":emu" process ends when the game is closed.
++	private static boolean launchedFromLauncher = false;
++
++	private static boolean isLauncherIntent(Intent intent) {
++		return intent != null && intent.getBooleanExtra(LaunchContract.EXTRA_FROM_LAUNCHER, false);
++	}
++
+ 	private static boolean m_hasNoNativeBinary = false;
+ 
+ 	public static boolean libraryLoaded = false;
+@@ -702,6 +710,10 @@ public void run() {
+ 		// using Intent extra string. Intent extra will be null if launch normal
+ 		// (from app drawer or file explorer).
+ 		String shortcutParam = parseIntent(getIntent());
++		final boolean fromLauncher = isLauncherIntent(getIntent());
++		if (fromLauncher) {
++			launchedFromLauncher = true;
++		}
+ 		if (shortcutParam != null) {
+ 			Log.i(TAG, "Found Shortcut Parameter in data, passing on: " + shortcutParam);
+ 			setShortcutParam(shortcutParam);
+@@ -784,7 +796,9 @@ public void run() {
+ 			// render loop thread will be started once we get a surface.
+ 		}
+ 
+-		if (shortcutParam != null && !shortcutParam.isEmpty()) {
++		// Launcher intents carry command line flags, not just a path, and are consumed by
++		// Initialize(). Re-sending them here would be misread as a game path.
++		if (!fromLauncher && shortcutParam != null && !shortcutParam.isEmpty()) {
+ 			Log.i(TAG, "Got shortcutParam in onCreate on secondary run: " + shortcutParam);
+ 			// Make sure we only send it once.
+ 			NativeApp.sendMessageFromJava("shortcutParam", shortcutParam);
+@@ -996,6 +1010,10 @@ protected void onDestroy() {
+ 		super.onDestroy();
+ 		lifeCycle.onDestroy();
+ 
++		// In launcher mode, closing the game (pause menu "Exit", or backing out) ends the
++		// emulator process, so the next launch from the launcher always starts fresh.
++		final boolean exitLauncherProcess = launchedFromLauncher && isFinishing();
++
+ 		if (javaGL) {
+ 			nativeRenderer = null;
+ 			mGLSurfaceView = null;
+@@ -1020,7 +1038,7 @@ protected void onDestroy() {
+ 		// TODO: Can we ensure that the GL thread has stopped rendering here?
+ 		// I've seen crashes that seem to indicate that sometimes it hasn't...
+ 		NativeApp.audioShutdown();
+-		if (shuttingDown) {
++		if (shuttingDown || exitLauncherProcess) {
+ 			Log.i(TAG, "in onDestroy, shutting down. Calling NativeApp.shutdown().");
+ 			NativeApp.shutdown();
+ 			unregisterCallbacks();
+@@ -1034,6 +1052,10 @@ protected void onDestroy() {
+ 		if (isVRDevice()) {
+ 			System.exit(0);
+ 		}
++		if (exitLauncherProcess) {
++			Log.i(TAG, "Launcher mode: game closed, ending the emulator process.");
++			System.exit(0);
++		}
+ 		Log.i(TAG, "onDestroy end");
+ 	}
+ 
+@@ -1715,7 +1737,8 @@ public boolean processCommand(String command, String params) {
+ 		} else if (command.equals("graphics_restart")) {
+ 			Log.i(TAG, "graphics_restart: Calling recreate() on activity");
+ 			if (params != null && !params.isEmpty()) {
+-				overrideShortcutParam = params;
++				// Keep "Exit" in the pause menu returning to the launcher after a restart.
++				overrideShortcutParam = launchedFromLauncher ? "--pause-menu-exit " + params : params;
+ 			}
+ 			shuttingDown = true;
+ 			recreate();
+@@ -1835,6 +1858,21 @@ public static boolean isVRDevice() {
+ 	}
+ 
+ 	private static String parseIntent(Intent intent) {
++		if (isLauncherIntent(intent)) {
++			// Flags first, then the quoted game path. See LauncherActivity.emulatorIntent().
++			String flags = intent.getStringExtra(LaunchContract.EXTRA_FLAGS);
++			String game = intent.getStringExtra(LaunchContract.EXTRA_GAME);
++			StringBuilder args = new StringBuilder();
++			if (flags != null) {
++				args.append(flags);
++			}
++			if (game != null && !game.isEmpty()) {
++				args.append(" \"").append(game.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
++			}
++			String result = args.toString().trim();
++			Log.i(TAG, "Launcher arguments: " + result);
++			return result;
++		}
+ 		Uri data = intent.getData();
+ 		if (data != null) {
+ 			String path = data.toString();
+@@ -1891,6 +1929,10 @@ public void onNewIntent(Intent intent) {
+ 				Log.i(TAG, "Received failed or cancelled proxied result: path='" + path + "' requestId=" + requestId + " resultCode=" + resultCode);
+ 				NativeApp.sendRequestResult(requestId, false, path != null ? path : "", resultCode);
+ 			}
++		} else if (isLauncherIntent(intent)) {
++			// The launcher just wants the running game back in front. Nothing to boot.
++			Log.i(TAG, "onNewIntent from launcher: resuming the running game.");
++			setIntent(intent);
+ 		} else {
+ 			// Someone launched a shortcut while we were running....
+ 			setIntent(intent);
