@@ -30,6 +30,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -66,12 +67,74 @@ public class LauncherActivity extends Activity {
 	private static final String K_BACKEND = "backend";
 	private static final String K_FPS = "show_fps";
 	private static final String K_STYLE = "button_style";
+	private static final String K_APPLIED_STYLE = "applied_button_style";
+	private static final String K_EFFECT = "visual_effect";
+	private static final String K_PROFILES = "character_profiles";
+	private static final String K_SIDE = "player_side";
+	private static final String K_CHAR_STYLE = "char_style_";
 
 	private static final String BACKEND_VULKAN = "vulkan";
 	private static final String BACKEND_OPENGL = "opengl";
 
 	static final String STYLE_PSP = "psp";
 	static final String STYLE_ARCADE = "arcade";
+
+	/** Character auto-detection reads memory addresses of the US version only. */
+	private static final String PROFILE_GAME_ID = "ULUS10409";
+
+	/**
+	 * Internal character numbers of the GGXX series (index = number). Profiles are saved by
+	 * number, so they keep working even if a name here doesn't match the game's order.
+	 */
+	static final String[] CHARACTERS = {
+		"", "Sol", "Ky", "May", "Millia", "Axl", "Potemkin", "Chipp", "Eddie", "Baiken", "Faust",
+		"Testament", "Jam", "Anji", "Johnny", "Venom", "Dizzy", "Slayer", "I-No", "Zappa",
+		"Bridget", "Robo-Ky", "A.B.A", "Order-Sol", "Kliff", "Justice",
+	};
+
+	/** A post-processing look: PPSSPP shader section names, applied as a chain. */
+	private static final class Effect {
+		final String id;
+		final String label;
+		final String description;
+		final String[] shaders;
+		final int preview;
+
+		Effect(String id, String label, String description, int preview, String... shaders) {
+			this.id = id;
+			this.label = label;
+			this.description = description;
+			this.preview = preview;
+			this.shaders = shaders;
+		}
+	}
+
+	private static final Effect[] EFFECTS = {
+		new Effect("none", "Original",
+			"Sin filtro. El juego se dibuja a la resolución que elijas arriba.",
+			R.drawable.fx_original),
+		new Effect("arcade", "Arcade",
+			"Monitor de recreativa: scanlines marcadas, rejilla RGB, brillo y una curvatura suave.",
+			R.drawable.fx_arcade, "AcArcade"),
+		new Effect("crt", "CRT",
+			"Televisor de tubo: imagen más suave, máscara de puntos y cristal curvo.",
+			R.drawable.fx_crt, "AcCrtTv"),
+		new Effect("scanlines", "Scanlines",
+			"Píxeles nítidos con líneas de barrido, sin curvatura.",
+			R.drawable.fx_scanlines, "AcScanlines"),
+		new Effect("ia", "IA",
+			"Red neuronal NNEDI3: duplica la resolución suavizando los bordes en escalera. Exigente: para teléfonos de gama media-alta.",
+			R.drawable.fx_ia, "AcNnedi3"),
+		new Effect("ia_rgb", "IA máx.",
+			"NNEDI3 en cada color por separado: la mejor calidad, unas 3 veces más pesado que «IA». Solo para teléfonos potentes.",
+			R.drawable.fx_ia_rgb, "AcNnedi3Rgb"),
+		new Effect("xbr", "xBR",
+			"Reescalado clásico para pixel art: contornos limpios y bien definidos. Ligero.",
+			R.drawable.fx_xbr, "5xBR-lv2"),
+		new Effect("fsr", "FSR",
+			"AMD FidelityFX: reescalado nítido y muy ligero.",
+			R.drawable.fx_fsr, "FSR-EASU", "FSR-RCAS"),
+	};
 
 	/** PSP screen is 480x272; 8x gives 3840x2176 (4K). */
 	private static final int PSP_W = 480;
@@ -107,6 +170,14 @@ public class LauncherActivity extends Activity {
 	private TextView styleArcade;
 	private TextView styleDesc;
 	private ControlsPreviewView controlsPreview;
+	private final TextView[] effectChips = new TextView[EFFECTS.length];
+	private ImageView effectPreview;
+	private TextView effectDesc;
+	private Switch profilesSwitch;
+	private LinearLayout profilesOptions;
+	private TextView side1p;
+	private TextView side2p;
+	private TextView profilesStatus;
 	private LinearLayout runningCard;
 	private TextView playButton;
 
@@ -271,11 +342,22 @@ public class LauncherActivity extends Activity {
 	 * Points the emulator's memory stick at app storage (so it never asks for a folder) and
 	 * writes the settings chosen here as an ini that PPSSPP applies on top of its own config.
 	 */
-	private void writeEmulatorConfig() throws IOException {
+	private File memstickDir() {
 		File memstick = getExternalFilesDir(null);
-		if (memstick == null) {
-			memstick = new File(getFilesDir(), "memstick");
-		}
+		return memstick != null ? memstick : new File(getFilesDir(), "memstick");
+	}
+
+	/** Per-character layouts saved by the emulator (see UI/AcPlusProfiles.h). */
+	private File profilesDir() {
+		return new File(memstickDir(), "PSP/SYSTEM/acplus_profiles");
+	}
+
+	private File savedProfile(int character) {
+		return new File(profilesDir(), String.format(Locale.ROOT, "char_%02d.ini", character));
+	}
+
+	private void writeEmulatorConfig() throws IOException {
+		File memstick = memstickDir();
 		String[] dirs = { "PSP/SYSTEM", "PSP/SAVEDATA", "PSP/PPSSPP_STATE", "PSP/GAME" };
 		for (String dir : dirs) {
 			File f = new File(memstick, dir);
@@ -290,7 +372,11 @@ public class LauncherActivity extends Activity {
 		boolean touch = prefs.getBoolean(K_TOUCH, true);
 		boolean fps = prefs.getBoolean(K_FPS, false);
 
-		boolean arcade = STYLE_ARCADE.equals(prefs.getString(K_STYLE, STYLE_PSP));
+		String style = prefs.getString(K_STYLE, STYLE_PSP);
+		boolean arcade = STYLE_ARCADE.equals(style);
+		// Only rewrite the button layout when the button type changes, so that buttons moved
+		// with the game's own layout editor stay where the player put them.
+		boolean writeLayout = !style.equals(prefs.getString(K_APPLIED_STYLE, ""));
 
 		StringBuilder ini = new StringBuilder();
 		ini.append("[General]\n")
@@ -301,16 +387,59 @@ public class LauncherActivity extends Activity {
 			.append("iShowStatusFlags = ").append(fps ? 2 : 0).append('\n')
 			.append("[Control]\n")
 			.append("ShowTouchControls = ").append(touch ? "True" : "False").append('\n');
-		if (arcade) {
+		if (writeLayout && arcade) {
 			appendArcadeButtonDefinitions(ini);
 		}
 		ini.append("[TouchControls.Landscape]\n");
 		// Fast-forward isn't a PSP or arcade button: never show it.
 		ini.append("ShowTouchUnthrottle = False\n");
-		appendTouchLayout(ini, arcade);
+		if (writeLayout) {
+			appendTouchLayout(ini, arcade);
+		}
 		ini.append("[TouchControls.Portrait]\n")
 			.append("ShowTouchUnthrottle = False\n");
+
+		// Post-processing effect (needs patches/0003 so the appended config can set it).
+		Effect effect = currentEffect();
+		ini.append("[PostShaderList]\n");
+		if (effect.shaders.length == 0) {
+			ini.append("PostShader1 = Off\n");
+		}
+		for (int i = 0; i < effect.shaders.length; i++) {
+			ini.append("PostShader").append(i + 1).append(" = ").append(effect.shaders[i]).append('\n');
+		}
 		writeText(configFile(), ini.toString());
+		prefs.edit().putString(K_APPLIED_STYLE, style).apply();
+
+		writeProfileConfig();
+	}
+
+	/** Settings and the two layout presets the emulator uses for per-character profiles. */
+	private void writeProfileConfig() throws IOException {
+		for (String preset : new String[] { STYLE_PSP, STYLE_ARCADE }) {
+			boolean arcade = STYLE_ARCADE.equals(preset);
+			StringBuilder layout = new StringBuilder("[Control]\n");
+			if (arcade) {
+				appendArcadeButtonDefinitions(layout);
+			}
+			layout.append("[TouchControls.Landscape]\n").append("ShowTouchUnthrottle = False\n");
+			appendTouchLayout(layout, arcade);
+			writeText(new File(getFilesDir(), "acplus_layout_" + preset + ".ini"), layout.toString());
+		}
+
+		StringBuilder ini = new StringBuilder();
+		ini.append("[Profiles]\n")
+			.append("Enabled = ").append(prefs.getBoolean(K_PROFILES, true) ? "True" : "False").append('\n')
+			.append("Side = ").append(prefs.getInt(K_SIDE, 0)).append('\n')
+			.append("DefaultStyle = ").append(prefs.getString(K_STYLE, STYLE_PSP)).append('\n')
+			.append("[Characters]\n");
+		for (int id = 1; id < CHARACTERS.length; id++) {
+			String s = prefs.getString(K_CHAR_STYLE + id, null);
+			if (STYLE_PSP.equals(s) || STYLE_ARCADE.equals(s)) {
+				ini.append(id).append(" = ").append(s).append('\n');
+			}
+		}
+		writeText(new File(getFilesDir(), "acplus.ini"), ini.toString());
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -541,6 +670,8 @@ public class LauncherActivity extends Activity {
 		refreshResolution();
 		refreshBackend();
 		refreshStyle();
+		refreshEffect();
+		refreshProfiles();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -628,7 +759,147 @@ public class LauncherActivity extends Activity {
 			hint = "Ultra, hasta 4K. Necesita un teléfono potente: si notas lentitud, baja un nivel.";
 		}
 		hint += "\nRecomendada para tu pantalla: " + recommendedRes + "×.";
+		Effect effect = currentEffect();
+		boolean applies = effect.shaders.length == 0;
+		if (!applies) {
+			hint = "Con el efecto «" + effect.label + "» el juego se dibuja a su resolución original "
+				+ "(480 × 272) y el efecto lo amplía hasta la de tu pantalla, sin tocar los sprites. "
+				+ "Para usar esta resolución elige el efecto «Original».";
+		}
+		for (TextView chip : resChips) {
+			chip.setAlpha(applies ? 1f : 0.45f);
+		}
+		resInfo.setAlpha(applies ? 1f : 0.45f);
 		resHint.setText(hint);
+	}
+
+	private Effect currentEffect() {
+		String id = prefs.getString(K_EFFECT, "none");
+		for (Effect e : EFFECTS) {
+			if (e.id.equals(id)) {
+				return e;
+			}
+		}
+		return EFFECTS[0];
+	}
+
+	private void refreshEffect() {
+		Effect current = currentEffect();
+		for (int i = 0; i < EFFECTS.length; i++) {
+			styleChip(effectChips[i], EFFECTS[i] == current);
+		}
+		effectPreview.setImageResource(current.preview);
+		effectPreview.setContentDescription("Vista previa del efecto " + current.label);
+		effectDesc.setText(current.description);
+	}
+
+	private boolean isProfileGame() {
+		String id = prefs.getString(K_ID, null);
+		return id == null || PROFILE_GAME_ID.equalsIgnoreCase(id.replace("-", ""));
+	}
+
+	private void refreshProfiles() {
+		boolean on = prefs.getBoolean(K_PROFILES, true);
+		profilesSwitch.setChecked(on);
+		int side = prefs.getInt(K_SIDE, 0);
+		styleChip(side1p, side == 0);
+		styleChip(side2p, side == 1);
+		profilesOptions.setAlpha(on ? 1f : 0.45f);
+		int saved = 0;
+		int custom = 0;
+		for (int id = 1; id < CHARACTERS.length; id++) {
+			if (savedProfile(id).isFile()) {
+				saved++;
+			}
+			if (prefs.getString(K_CHAR_STYLE + id, null) != null) {
+				custom++;
+			}
+		}
+		StringBuilder s = new StringBuilder();
+		if (!isProfileGame()) {
+			s.append("⚠ Tu copia es ").append(prefs.getString(K_ID, "")).append(". El cambio automático solo funciona con la versión americana (ULUS-10409); con otras versiones se usa siempre el tipo de botones general.\n\n");
+		}
+		s.append(custom == 0 ? "Todos usan el tipo de botones general." : custom + (custom == 1 ? " personaje tiene" : " personajes tienen") + " un tipo de botones propio.");
+		s.append(saved == 0 ? "" : "\n" + saved + (saved == 1 ? " personaje tiene" : " personajes tienen") + " una distribución guardada.");
+		profilesStatus.setText(s.toString());
+	}
+
+	private String characterStyleLabel(int id) {
+		String style = prefs.getString(K_CHAR_STYLE + id, null);
+		String label = STYLE_ARCADE.equals(style) ? "Arcade" : STYLE_PSP.equals(style) ? "PSP" : "General";
+		if (savedProfile(id).isFile()) {
+			label += " · distribución guardada";
+		}
+		return label;
+	}
+
+	private void showCharacterList() {
+		String[] rows = new String[CHARACTERS.length - 1];
+		for (int id = 1; id < CHARACTERS.length; id++) {
+			rows[id - 1] = CHARACTERS[id] + "  —  " + characterStyleLabel(id);
+		}
+		new AlertDialog.Builder(this)
+			.setTitle("Botones por personaje")
+			.setItems(rows, (d, which) -> showCharacterOptions(which + 1))
+			.setNegativeButton("Cerrar", null)
+			.show();
+	}
+
+	private void showCharacterOptions(int id) {
+		final boolean hasSaved = savedProfile(id).isFile();
+		String[] options = hasSaved
+			? new String[] { "General (el de la sección Controles)", "PSP", "Arcade", "Borrar la distribución guardada" }
+			: new String[] { "General (el de la sección Controles)", "PSP", "Arcade" };
+		new AlertDialog.Builder(this)
+			.setTitle(CHARACTERS[id])
+			.setItems(options, (d, which) -> {
+				if (which == 3) {
+					deleteSavedProfile(id);
+				} else {
+					String style = which == 1 ? STYLE_PSP : which == 2 ? STYLE_ARCADE : null;
+					String old = prefs.getString(K_CHAR_STYLE + id, null);
+					SharedPreferences.Editor e = prefs.edit();
+					if (style == null) {
+						e.remove(K_CHAR_STYLE + id);
+					} else {
+						e.putString(K_CHAR_STYLE + id, style);
+					}
+					e.apply();
+					// A new button type replaces the layout saved for this character.
+					boolean changed = old == null ? style != null : !old.equals(style);
+					if (changed) {
+						deleteSavedProfile(id);
+					}
+				}
+				refreshProfiles();
+				showCharacterList();
+			})
+			.setNegativeButton("Atrás", (d, w) -> showCharacterList())
+			.show();
+	}
+
+	private void deleteSavedProfile(int id) {
+		File f = savedProfile(id);
+		if (f.isFile() && !f.delete()) {
+			Log.w(TAG, "Could not delete " + f);
+		}
+	}
+
+	private void confirmResetProfiles() {
+		new AlertDialog.Builder(this)
+			.setTitle("¿Restablecer todos los personajes?")
+			.setMessage("Todos volverán al tipo de botones general y se borrarán las distribuciones guardadas por personaje.")
+			.setPositiveButton("Restablecer", (d, w) -> {
+				SharedPreferences.Editor e = prefs.edit();
+				for (int id = 1; id < CHARACTERS.length; id++) {
+					e.remove(K_CHAR_STYLE + id);
+					deleteSavedProfile(id);
+				}
+				e.apply();
+				refreshProfiles();
+			})
+			.setNegativeButton("Cancelar", null)
+			.show();
 	}
 
 	private static String resolutionTag(int res) {
@@ -775,6 +1046,53 @@ public class LauncherActivity extends Activity {
 		resHint.setPadding(0, dp(4), 0, 0);
 		resolution.addView(resHint);
 
+		// Visual effects (post-processing only)
+		LinearLayout effects = section(col, "EFECTOS VISUALES");
+		for (int row = 0; row * 4 < EFFECTS.length; row++) {
+			LinearLayout chips = new LinearLayout(this);
+			chips.setOrientation(LinearLayout.HORIZONTAL);
+			for (int c = 0; c < 4; c++) {
+				int index = row * 4 + c;
+				if (index >= EFFECTS.length) {
+					chips.addView(new View(this), weighted(dp(4), 0));
+					continue;
+				}
+				final Effect effect = EFFECTS[index];
+				TextView chip = chip(effect.label);
+				chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+				chip.setOnClickListener(v -> {
+					prefs.edit().putString(K_EFFECT, effect.id).apply();
+					refreshEffect();
+					refreshResolution();
+				});
+				effectChips[index] = chip;
+				LinearLayout.LayoutParams lp = weighted(c == 0 ? 0 : dp(4), c == 3 ? 0 : dp(4));
+				lp.bottomMargin = dp(8);
+				chips.addView(chip, lp);
+			}
+			effects.addView(chips);
+		}
+		effectPreview = new ImageView(this);
+		effectPreview.setAdjustViewBounds(true);
+		effectPreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+		GradientDrawable previewBg = new GradientDrawable();
+		previewBg.setColor(Color.BLACK);
+		previewBg.setCornerRadius(dp(10));
+		effectPreview.setBackground(previewBg);
+		effectPreview.setClipToOutline(true);
+		LinearLayout.LayoutParams fxParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		fxParams.topMargin = dp(4);
+		effects.addView(effectPreview, fxParams);
+		TextView previewNote = text("Vista previa con una imagen de ejemplo (no es del juego).", 11, 0xFF6C6C78, false);
+		previewNote.setPadding(0, dp(4), 0, 0);
+		effects.addView(previewNote);
+		effectDesc = text("", 13, C_MUTED, false);
+		effectDesc.setPadding(0, dp(8), 0, 0);
+		effects.addView(effectDesc);
+		TextView fxNote = text("Solo cambian la imagen final: los sprites del juego no se tocan. Puedes afinar cada efecto en el juego: Pausa → Ajustes → Gráficos.", 13, C_MUTED, false);
+		fxNote.setPadding(0, dp(8), 0, 0);
+		effects.addView(fxNote);
+
 		// Controls
 		LinearLayout controls = section(col, "CONTROLES");
 		controls.addView(text("Tipo de botones en pantalla", 15, C_TEXT, true));
@@ -809,6 +1127,55 @@ public class LauncherActivity extends Activity {
 		TextView padNote = text("Los controles funcionan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D y L1 = Respeto. Puedes reasignarlos dentro del juego en Ajustes → Controles.", 13, C_MUTED, false);
 		padNote.setPadding(0, dp(12), 0, 0);
 		controls.addView(padNote);
+
+		// Per-character profiles
+		LinearLayout profiles = section(col, "PERFILES POR PERSONAJE");
+		profilesSwitch = switchRow(profiles, "Cambiar los botones según el personaje",
+			"Cada personaje recuerda su propia distribución. Si mueves o agrandas botones mientras juegas con alguien (Pausa → Ajustes → Controles → Editar distribución), quedan guardados para ese personaje.");
+		profilesSwitch.setOnCheckedChangeListener((b, checked) -> {
+			prefs.edit().putBoolean(K_PROFILES, checked).apply();
+			refreshProfiles();
+		});
+		profilesOptions = new LinearLayout(this);
+		profilesOptions.setOrientation(LinearLayout.VERTICAL);
+		profilesOptions.setPadding(0, dp(14), 0, 0);
+		profiles.addView(profilesOptions);
+
+		profilesOptions.addView(text("Tú juegas como", 15, C_TEXT, true));
+		LinearLayout sideRow = new LinearLayout(this);
+		sideRow.setOrientation(LinearLayout.HORIZONTAL);
+		sideRow.setPadding(0, dp(10), 0, dp(4));
+		side1p = chip("Jugador 1");
+		side1p.setOnClickListener(v -> {
+			prefs.edit().putInt(K_SIDE, 0).apply();
+			refreshProfiles();
+		});
+		side2p = chip("Jugador 2");
+		side2p.setOnClickListener(v -> {
+			prefs.edit().putInt(K_SIDE, 1).apply();
+			refreshProfiles();
+		});
+		sideRow.addView(side1p, weighted(0, dp(4)));
+		sideRow.addView(side2p, weighted(dp(4), 0));
+		profilesOptions.addView(sideRow);
+		TextView sideNote = text("Casi siempre es el jugador 1. Cambia a 2 solo si elegiste personaje con el control del jugador 2.", 13, C_MUTED, false);
+		sideNote.setPadding(0, 0, 0, dp(12));
+		profilesOptions.addView(sideNote);
+
+		profilesStatus = text("", 13, C_MUTED, false);
+		profilesStatus.setPadding(0, 0, 0, dp(12));
+		profilesOptions.addView(profilesStatus);
+		TextView perCharacter = outlineButton("Elegir botones por personaje");
+		perCharacter.setOnClickListener(v -> showCharacterList());
+		profilesOptions.addView(perCharacter, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		TextView reset = outlineButton("Restablecer todos");
+		reset.setOnClickListener(v -> confirmResetProfiles());
+		LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		resetParams.topMargin = dp(8);
+		profilesOptions.addView(reset, resetParams);
+		TextView profileNote = text("Al empezar el combate verás «Controles: nombre». Solo funciona con la versión americana del juego (ULUS-10409) y en combates individuales.", 13, C_MUTED, false);
+		profileNote.setPadding(0, dp(12), 0, 0);
+		profilesOptions.addView(profileNote);
 
 		// Graphics
 		LinearLayout graphics = section(col, "GRÁFICOS");

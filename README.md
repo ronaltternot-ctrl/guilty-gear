@@ -16,6 +16,8 @@ Por dentro usa el motor de emulación de [PPSSPP](https://www.ppsspp.org/) con u
 | **Resolución 1× a 8×** | 1× = 480×272 (PSP original) · 4× = 1920×1088 (Full HD) · **8× = 3840×2176 (4K)**. Te recomienda la mejor para tu pantalla. |
 | **Botones PSP o Arcade** | Elige en la pantalla de inicio: **PSP** (△ ○ ✕ □, L, R, como en la consola) o **Arcade** (P, K, S, HS y D, colocados como en la máquina de Guilty Gear: K S HS arriba, P y D abajo). Con vista previa. |
 | **Controles Bluetooth/USB** | Se detectan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D, L1 = Respeto. |
+| **Perfiles por personaje** | Los botones cambian solos según el personaje que uses. Cada personaje recuerda su propia distribución (si mueves botones mientras juegas con él, se guarda para él) y puedes elegir PSP o Arcade por personaje. Versión americana (ULUS-10409). |
+| **Efectos visuales** | Arcade (monitor de recreativa), CRT (televisor de tubo), Scanlines, **IA** (red neuronal NNEDI3), xBR y FSR. Solo procesan la imagen final: los sprites no se tocan. Con vista previa en la app. |
 | **Vulkan u OpenGL** | Vulkan por defecto (rinde mejor con los efectos de los súper ataques). |
 | **Detecta tu copia** | Lee el archivo y te confirma que es el juego correcto (por ejemplo `ULUS-10409`). |
 | **Partidas y guardados** | Guardado normal del juego y estados rápidos desde el menú de pausa. |
@@ -53,6 +55,9 @@ Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se inst
 | Fallos gráficos o pantalla negra | Cambia el motor gráfico a OpenGL. |
 | "No encuentro el juego" | Moviste o borraste el archivo: vuelve a elegirlo. |
 | No aparecen los botones en pantalla | Activa *Mostrar botones en pantalla* en la pantalla de inicio. |
+| Va lento con «IA» o «IA máx.» | Son los efectos más pesados. Prueba «IA» en vez de «IA máx.», o «xBR» / «FSR», que son ligeros. |
+| Los botones no cambian con el personaje | Revisa que *Cambiar los botones según el personaje* esté activado y que tu copia sea ULUS-10409. En combates por equipos no cambia. |
+| El aviso «Controles: …» muestra otro nombre | Avísanos qué personaje usabas y qué nombre salió: los perfiles funcionan igual, solo hay que corregir la tabla de nombres. |
 | Los botones arcade no hacen el golpe que dicen | Dentro del juego cambiaste la configuración de botones. Vuelve a la de fábrica en las opciones del juego (□ = P, ✕ = K, △ = S, ○ = HS, R = D). |
 | Quiero reasignar el control | En el juego: Atrás → Ajustes → pestaña Controles → asignación de botones. |
 | La app dice "Partida en curso" | El juego quedó abierto en segundo plano: *Continuar* o *Cerrar partida*. |
@@ -68,6 +73,9 @@ Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se inst
   - Los ajustes elegidos se pasan al emulador con `--appendconfig` (resolución interna, motor gráfico, FPS, botones táctiles) y `--pause-menu-exit` para que *Salir* cierre el juego.
   - La "memory stick" se fija en el almacenamiento de la app, así que nunca pide elegir carpeta.
   - Etiquetas P, K, S, HS y D para los botones arcade (`patches/0002-arcade-button-labels.patch` + `assets/ui_images/gg_buttons.svg`, generado con [`scripts/make_gg_glyphs.py`](scripts/make_gg_glyphs.py) a partir de la fuente Roboto Condensed que ya trae PPSSPP). El modo arcade usa los botones personalizados de PPSSPP con el mapeo del juego en PSP: □ = P, ✕ = K, △ = S, ○ = HS, R = D.
+  - Perfiles por personaje (`patches/0003` + [`overlay/UI/AcPlusProfiles.h`](overlay/UI/AcPlusProfiles.h)): cada ~0,2 s se lee el personaje del jugador en la memoria del juego (`0x08C6BB58` para 1P y `0x08C6BB5A` para 2P, direcciones de la base de datos CWCheat para ULUS-10409). Cuando cambia, se guarda la distribución del personaje anterior si la editaste (`PSP/SYSTEM/acplus_profiles/char_NN.ini`) y se carga la del nuevo, o su tipo de botones elegido en la app. `Config::SaveTouchLayout/LoadTouchLayout` guardan solo los botones en pantalla.
+  - Efectos visuales: la configuración añadida (`--appendconfig`) puede elegir la cadena de shaders (`[PostShaderList]`). Los shaders propios están en [`overlay/assets/shaders/`](overlay/assets/shaders/) (`acplus.ini`). Todos usan `Upscaling=True`, así que el juego se dibuja a 480×272 y el shader construye la imagen a la resolución de la pantalla.
+  - **IA (NNEDI3)**: la misma red neuronal que PPSSPP trae para reescalar texturas, convertida en post-procesado de 3 pasos (filas ×2, columnas ×2 y Catmull-Rom a pantalla corrigiendo el desfase de medio píxel). La generan [`scripts/make_nnedi3_shaders.py`](scripts/make_nnedi3_shaders.py) (pesos tomados de `tex_nnedi3_2x_single.csh`) y [`scripts/make_crt_shaders.py`](scripts/make_crt_shaders.py) los CRT. [`scripts/check_shaders.py`](scripts/check_shaders.py) los compila como GLSL ES 1.00 y como Vulkan, igual que PPSSPP.
 - **Archivos propios** ([`overlay/`](overlay/)): `LauncherActivity.java`, `ControlsPreviewView.java` (vista previa de los botones), `GameInspector.java` (lee `PARAM.SFO` de ISO y CSO para identificar el juego), `LaunchContract.java`, tema e íconos.
 - **Compilación**: [`.github/workflows/build.yml`](.github/workflows/build.yml) descarga PPSSPP, aplica los cambios con [`scripts/prepare.sh`](scripts/prepare.sh) y compila `assembleNormalRelease` para `arm64-v8a`. Firma con [`keystore/release.p12`](keystore/) para que las actualizaciones se instalen encima.
 

@@ -1,0 +1,133 @@
+diff --git a/Core/Config.cpp b/Core/Config.cpp
+index e7fd30d..3687237 100644
+--- a/Core/Config.cpp
++++ b/Core/Config.cpp
+@@ -1250,6 +1250,48 @@ void Config::UpdateIniLocation(const char *iniFileName, const char *controllerIn
+ 	controllerIniFilename_ = FindConfigFile(searchPath_, useControllerIniFilename ? controllerIniFilename : controlsIniFilename, &exists);
+ }
+ 
++// Launcher build (GGXX AC+): just the on-screen button layout, for per-character profiles.
++// That is the whole [TouchControls.Landscape] block plus the custom button definitions.
++static bool IsTouchLayoutControlKey(std::string_view key) {
++	return startsWith(key, "Custom");
++}
++
++void Config::SaveTouchLayout(IniFile &ini) const {
++	Section *control = ini.GetOrCreateSection("Control");
++	for (const ConfigSetting &setting : controlSettings) {
++		if (IsTouchLayoutControlKey(setting.IniKey()))
++			setting.WriteToIniSection(this, control);
++	}
++	Section *touch = ini.GetOrCreateSection("TouchControls.Landscape");
++	for (const ConfigSetting &setting : touchControlSettings) {
++		setting.WriteToIniSection(&touchControlsLandscape, touch);
++	}
++}
++
++void Config::LoadTouchLayout(const IniFile &ini, bool resetFirst) {
++	if (resetFirst) {
++		// Back to defaults first, so keys missing from a partial layout don't keep old values.
++		for (const ConfigSetting &setting : controlSettings) {
++			if (IsTouchLayoutControlKey(setting.IniKey()))
++				setting.RestoreToDefault(this, false);
++		}
++		for (const ConfigSetting &setting : touchControlSettings) {
++			setting.RestoreToDefault(&touchControlsLandscape, false);
++		}
++	}
++	if (const Section *control = ini.GetSection("Control")) {
++		for (const ConfigSetting &setting : controlSettings) {
++			if (IsTouchLayoutControlKey(setting.IniKey()))
++				setting.ReadFromIniSection(this, control, false);
++		}
++	}
++	if (const Section *touch = ini.GetSection("TouchControls.Landscape")) {
++		for (const ConfigSetting &setting : touchControlSettings) {
++			setting.ReadFromIniSection(&touchControlsLandscape, touch, false);
++		}
++	}
++}
++
+ bool Config::LoadAppendedConfig() {
+ 	IniFile iniFile;
+ 	if (!iniFile.Load(appendedConfigFileName_)) {
+@@ -1267,6 +1309,22 @@ bool Config::LoadAppendedConfig() {
+ 		}
+ 	}
+ 
++	// Launcher build: the appended config can also choose the post-processing shader chain.
++	if (const Section *chain = iniFile.GetSection("PostShaderList")) {
++		vPostShaderNames.clear();
++		for (const auto &it : chain->ToMap()) {
++			if (it.second != "Off")
++				vPostShaderNames.push_back(it.second);
++		}
++	}
++	if (const Section *shaderSettings = iniFile.GetSection("PostShaderSetting")) {
++		for (const auto &[key, value] : shaderSettings->ToMap()) {
++			float f;
++			if (TryParse(value, &f))
++				mPostShaderSetting[key] = f;
++		}
++	}
++
+ 	INFO_LOG(Log::Loader, "Loaded appended config '%s'.", appendedConfigFileName_.c_str());
+ 
+ 	Save("Loaded appended config"); // Let's prevent reset
+diff --git a/Core/Config.h b/Core/Config.h
+index 87f9f4d..6208e33 100644
+--- a/Core/Config.h
++++ b/Core/Config.h
+@@ -727,6 +727,9 @@ struct Config : public ConfigBlock {
+ 	bool IsBackendEnabled(GPUBackend backend);
+ 
+ 	bool LoadAppendedConfig();
++	// Launcher build: save / restore only the on-screen button layout (per-character profiles).
++	void SaveTouchLayout(IniFile &ini) const;
++	void LoadTouchLayout(const IniFile &ini, bool resetFirst);
+ 	void SetAppendedConfigIni(const Path &path) { appendedConfigFileName_ = path; }
+ 	void UpdateAfterSettingAutoFrameSkip();
+ 	void NotifyUpdatedCpuCore();
+diff --git a/UI/EmuScreen.cpp b/UI/EmuScreen.cpp
+index b294842..1965e4c 100644
+--- a/UI/EmuScreen.cpp
++++ b/UI/EmuScreen.cpp
+@@ -83,6 +83,7 @@ using namespace std::placeholders;
+ #include "UI/MainScreen.h"
+ #include "UI/Background.h"
+ #include "UI/EmuScreen.h"
++#include "UI/AcPlusProfiles.h"
+ #include "UI/DevScreens.h"
+ #include "UI/GameInfoCache.h"
+ #include "UI/BaseScreens.h"
+@@ -450,6 +451,8 @@ void EmuScreen::bootComplete() {
+ 
+ EmuScreen::~EmuScreen() {
+ 	g_controlMapper.RemoveListener(this);
++	// Launcher build: keep layout edits made for the current character.
++	AcPlusProfiles::SaveIfModified();
+ 
+ 	if (imguiInited_) {
+ 		ImGui_ImplThin3d_Shutdown();
+@@ -514,6 +517,9 @@ void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
+ 		return;
+ 	}
+ 
++	// Launcher build: the layout editor lives behind the pause menu; save its result now.
++	AcPlusProfiles::SaveIfModified();
++
+ 	// Returning to the PauseScreen, unless we're stepping, means we should go back to controls.
+ 	UI::EnableFocusMovement(false);
+ 
+@@ -1492,6 +1498,11 @@ void EmuScreen::update() {
+ 	if (!PSP_IsInited())
+ 		return;
+ 
++	// Launcher build: swap the touch layout when the player's character changes.
++	if (!bootPending_ && AcPlusProfiles::Update()) {
++		RecreateViews();
++	}
++
+ 	double now = time_now_d();
+ 
+ 	DisplayLayoutConfig &config = g_Config.GetDisplayLayoutConfig(GetDeviceOrientation());
