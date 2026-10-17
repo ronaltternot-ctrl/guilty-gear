@@ -1,0 +1,59 @@
+diff --git a/GPU/Common/PostShader.cpp b/GPU/Common/PostShader.cpp
+index 0e6ca85..7c3819a 100644
+--- a/GPU/Common/PostShader.cpp
++++ b/GPU/Common/PostShader.cpp
+@@ -166,6 +166,9 @@ void LoadPostShaderInfo(Draw::DrawContext *draw, const std::vector<Path> &direct
+ 					section.Get("SSAA", &info.SSAAFilterLevel);
+ 					section.Get("60fps", &info.requires60fps);
+ 					section.Get("UsePreviousFrame", &info.usePreviousFrame);
++					section.Get("OutputScaleSetting", &info.outputScaleSetting);
++					if (info.outputScaleSetting < 0 || info.outputScaleSetting > 4)
++						info.outputScaleSetting = 0;
+ 
+ 					if (info.parent == "Off")
+ 						info.parent.clear();
+diff --git a/GPU/Common/PostShader.h b/GPU/Common/PostShader.h
+index 77fdbb9..ee41581 100644
+--- a/GPU/Common/PostShader.h
++++ b/GPU/Common/PostShader.h
+@@ -49,6 +49,10 @@ struct ShaderInfo {
+ 	bool requires60fps;
+ 	// Takes previous frame as input (for blending effects.)
+ 	bool usePreviousFrame;
++	// Launcher build: run at the input size times the value of this setting (1-4), up to the
++	// size of the game on screen; 0 = off. Lets AMD FSR's EASU upscale by a chosen factor
++	// while the game keeps its internal resolution.
++	int outputScaleSetting;
+ 
+ 	struct Setting {
+ 		std::string name;
+diff --git a/GPU/Common/PresentationCommon.cpp b/GPU/Common/PresentationCommon.cpp
+index 37bf677..2b0b336 100644
+--- a/GPU/Common/PresentationCommon.cpp
++++ b/GPU/Common/PresentationCommon.cpp
+@@ -407,6 +407,25 @@ bool PresentationCommon::BuildPostShader(const DisplayLayoutConfig &config, cons
+ 			// Increase the resolution this shader outputs for the next to SSAA.
+ 			nextWidth *= next->SSAAFilterLevel;
+ 			nextHeight *= next->SSAAFilterLevel;
++		} else if (shaderInfo->outputScaleSetting >= 1 && shaderInfo->outputScaleSetting <= 4) {
++			// Launcher build: this pass scales its input by the value of one of its settings
++			// (AMD FSR EASU), but never beyond the size of the game on screen.
++			static const char *const suffixes[4] = { "SettingCurrentValue1", "SettingCurrentValue2", "SettingCurrentValue3", "SettingCurrentValue4" };
++			const int index = shaderInfo->outputScaleSetting - 1;
++			float scale = GetShaderSettingValue(shaderInfo, index, suffixes[index]);
++			FRect rc;
++			FRect frame = GetScreenFrame(config.bIgnoreScreenInsets, (float)pixelWidth_, (float)pixelHeight_);
++			CalculateDisplayOutputRect(config, &rc, 480.0f, 272.0f, frame, config.iInternalScreenRotation);
++			float screenW = rc.w, screenH = rc.h;
++			if (config.InternalRotationIsPortrait())
++				std::swap(screenW, screenH);
++			if (nextWidth > 0 && nextHeight > 0)
++				scale = std::min(scale, std::min(screenW / (float)nextWidth, screenH / (float)nextHeight));
++			if (scale > 1.0f) {
++				nextWidth = (int)(nextWidth * scale + 0.5f);
++				nextHeight = (int)(nextHeight * scale + 0.5f);
++			}
++			INFO_LOG(Log::FrameBuf, "Post shader %s: scale %.2f -> %dx%d", shaderInfo->section.c_str(), scale, nextWidth, nextHeight);
+ 		} else if (shaderInfo->outputResolution) {
+ 			// If the current shader uses output res (not next), we will use output res for it.
+ 			FRect rc;

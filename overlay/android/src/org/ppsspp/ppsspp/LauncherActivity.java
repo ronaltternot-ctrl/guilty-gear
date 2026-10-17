@@ -38,6 +38,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
@@ -92,6 +93,14 @@ public class LauncherActivity extends Activity {
 	private static final String K_GES_SCALE = "gesture_scale";
 	private static final String K_GES_ALPHA = "gesture_opacity";
 	private static final String K_GES_MOVE = "gesture_move_";
+	// AMD FSR 1.0 (beta), saved per game: key + disc ID (e.g. "fsr_on_ULUS10409").
+	private static final String K_FSR_ON = "fsr_on_";
+	private static final String K_FSR_SCALE = "fsr_scale_";   // factor x 10: 15, 20, 30
+	private static final String K_FSR_SHARP = "fsr_sharp_";   // RCAS sharpness, 0-100
+	private static final int[] FSR_SCALES = { 15, 20, 30 };
+	private static final String[] FSR_SCALE_LABELS = { "1.5×", "2×", "3×" };
+	private static final int FSR_DEFAULT_SCALE = 20;
+	private static final int FSR_DEFAULT_SHARP = 85;
 
 	private static final int[] GES_SCALES = { 80, 100, 125 };
 	private static final String[] GES_SCALE_LABELS = { "Pequeños", "Normales", "Grandes" };
@@ -188,9 +197,6 @@ public class LauncherActivity extends Activity {
 		new Effect("xbr", "xBR",
 			"Reescalado clásico para pixel art: contornos limpios y bien definidos. Ligero.",
 			R.drawable.fx_xbr, "5xBR-lv2"),
-		new Effect("fsr", "FSR",
-			"AMD FidelityFX: reescalado nítido y muy ligero.",
-			R.drawable.fx_fsr, "FSR-EASU", "FSR-RCAS"),
 	};
 
 	/** PSP screen is 480x272; 8x gives 3840x2176 (4K). */
@@ -249,6 +255,18 @@ public class LauncherActivity extends Activity {
 	private TextView gestureCharButton;
 	private LinearLayout gestureMoveRows;
 	private int gestureChar = 1;
+	private ScrollView mainScroll;
+	private TextView amdButtonStatus;
+	private LinearLayout fsrPanel;
+	private Switch fsrSwitch;
+	private LinearLayout fsrOptions;
+	private final TextView[] fsrScaleChips = new TextView[FSR_SCALES.length];
+	private SeekBar fsrSeek;
+	private TextView fsrSharpValue;
+	private TextView fsrInfo;
+	private TextView fsrWarn;
+	private TextView fsrNote;
+	private final List<View> effectRows = new ArrayList<>();
 	private final TextView[] netChips = new TextView[NET_MODES.length];
 	private EditText nickInput;
 	private LinearLayout netHostPanel;
@@ -272,6 +290,7 @@ public class LauncherActivity extends Activity {
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+		migrateFsrEffect();
 		recommendedRes = computeRecommendedResolution();
 		if (!prefs.contains(K_RES)) {
 			prefs.edit().putInt(K_RES, recommendedRes).apply();
@@ -331,6 +350,7 @@ public class LauncherActivity extends Activity {
 			.apply();
 		inspectingUri = null;
 		refreshGame();
+		refreshPerGame();
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -501,14 +521,23 @@ public class LauncherActivity extends Activity {
 		ini.append("[TouchControls.Portrait]\n")
 			.append("ShowTouchUnthrottle = False\n");
 
-		// Post-processing effect (needs patches/0003 so the appended config can set it).
+		// Post-processing (needs patches/0003 so the appended config can set it). AMD FSR, when on
+		// for this game, replaces the visual effect and keeps the internal resolution (patches/0005).
 		Effect effect = currentEffect();
 		ini.append("[PostShaderList]\n");
-		if (effect.shaders.length == 0) {
-			ini.append("PostShader1 = Off\n");
-		}
-		for (int i = 0; i < effect.shaders.length; i++) {
-			ini.append("PostShader").append(i + 1).append(" = ").append(effect.shaders[i]).append('\n');
+		if (fsrOn()) {
+			ini.append("PostShader1 = AcFsrEasu\n")
+				.append("PostShader2 = AcFsrRcas\n")
+				.append("[PostShaderSetting]\n")
+				.append(String.format(Locale.ROOT, "AcFsrEasuSettingCurrentValue1 = %.2f\n", fsrScale() / 10f))
+				.append(String.format(Locale.ROOT, "AcFsrRcasSettingCurrentValue1 = %.2f\n", fsrSharp() / 100f));
+		} else {
+			if (effect.shaders.length == 0) {
+				ini.append("PostShader1 = Off\n");
+			}
+			for (int i = 0; i < effect.shaders.length; i++) {
+				ini.append("PostShader").append(i + 1).append(" = ").append(effect.shaders[i]).append('\n');
+			}
 		}
 		appendNetworkConfig(ini);
 		writeText(configFile(), ini.toString());
@@ -610,6 +639,11 @@ public class LauncherActivity extends Activity {
 			ini.append(HB_INI_KEYS[i]).append(" = ").append(prefs.getBoolean(HB_KEYS[i], true) ? "True" : "False").append('\n');
 		}
 		ini.append(hitboxManualLines(prefs.getString(K_HB_MANUAL, "")));
+		ini.append("[Fsr]\n")
+			.append("Enabled = ").append(fsrOn() ? "True" : "False").append('\n')
+			.append("GameId = ").append(fsrGameKey().equals("default") ? "" : fsrGameKey()).append('\n')
+			.append(String.format(Locale.ROOT, "Scale = %.2f\n", fsrScale() / 10f))
+			.append(String.format(Locale.ROOT, "Sharpness = %.2f\n", fsrSharp() / 100f));
 		ini.append("[Gestures]\n")
 			.append("Enabled = ").append(prefs.getBoolean(K_GESTURES, false) ? "True" : "False").append('\n')
 			.append("Scale = ").append(prefs.getInt(K_GES_SCALE, 100)).append('\n')
@@ -840,6 +874,7 @@ public class LauncherActivity extends Activity {
 					.apply();
 				inspectingUri = null;
 				refreshGame();
+				refreshPerGame();
 			});
 		}, "GameInspector").start();
 	}
@@ -857,6 +892,7 @@ public class LauncherActivity extends Activity {
 		refreshNetwork();
 		refreshHitboxes();
 		refreshGestures();
+		refreshFsr();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -945,8 +981,12 @@ public class LauncherActivity extends Activity {
 		}
 		hint += "\nRecomendada para tu pantalla: " + recommendedRes + "×.";
 		Effect effect = currentEffect();
-		boolean applies = effect.shaders.length == 0;
-		if (!applies) {
+		boolean fsr = fsrOn();
+		boolean applies = effect.shaders.length == 0 || fsr;
+		if (fsr) {
+			hint += "\nCon AMD FSR activo el juego se dibuja a esta resolución y FSR la escala ("
+				+ fsrScaleLabel(fsrScale()) + "). Mira «Gráficos».";
+		} else if (!applies) {
 			hint = "Con el efecto «" + effect.label + "» el juego se dibuja a su resolución original "
 				+ "(480 × 272) y el efecto lo amplía hasta la de tu pantalla, sin tocar los sprites. "
 				+ "Para usar esta resolución elige el efecto «Original».";
@@ -956,6 +996,9 @@ public class LauncherActivity extends Activity {
 		}
 		resInfo.setAlpha(applies ? 1f : 0.45f);
 		resHint.setText(hint);
+		if (fsrInfo != null) {
+			refreshFsr();
+		}
 	}
 
 	private Effect currentEffect() {
@@ -973,9 +1016,24 @@ public class LauncherActivity extends Activity {
 		for (int i = 0; i < EFFECTS.length; i++) {
 			styleChip(effectChips[i], EFFECTS[i] == current);
 		}
+		if (fsrOn()) {
+			effectPreview.setImageResource(R.drawable.fx_fsr);
+			effectPreview.setContentDescription("Vista previa de AMD FSR 1.0");
+			effectDesc.setText("BETA · AMD GRAPHICS: FSR 1.0 escala la imagen " + fsrScaleLabel(fsrScale())
+				+ " con EASU y la afina con RCAS, sobre la resolución interna que elegiste. El efecto «"
+				+ current.label + "» queda en pausa mientras FSR esté activo.");
+			return;
+		}
 		effectPreview.setImageResource(current.preview);
 		effectPreview.setContentDescription("Vista previa del efecto " + current.label);
 		effectDesc.setText(current.description);
+	}
+
+	/** Settings kept per game (AMD FSR): show the ones of the game just chosen. */
+	private void refreshPerGame() {
+		refreshFsr();
+		refreshEffect();
+		refreshResolution();
 	}
 
 	private boolean isProfileGame() {
@@ -1012,6 +1070,188 @@ public class LauncherActivity extends Activity {
 		s.append(saved == 0 ? "" : "\n" + saved + (saved == 1 ? " personaje tiene" : " personajes tienen") + " una distribución guardada.");
 		profilesStatus.setText(s.toString());
 	}
+
+	// -------------------------------------------------------------------------------------------
+	// AMD FSR 1.0 (beta)
+
+	/** FSR settings are kept per game, by disc ID ("default" until a game is chosen). */
+	private String fsrGameKey() {
+		String id = prefs.getString(K_ID, null);
+		return id == null || id.isEmpty() ? "default" : id.replace("-", "").toUpperCase(Locale.ROOT);
+	}
+
+	private boolean fsrOn() {
+		return prefs.getBoolean(K_FSR_ON + fsrGameKey(), false);
+	}
+
+	/** Scale factor times 10. */
+	private int fsrScale() {
+		int v = prefs.getInt(K_FSR_SCALE + fsrGameKey(), FSR_DEFAULT_SCALE);
+		for (int s : FSR_SCALES) {
+			if (s == v) {
+				return v;
+			}
+		}
+		return FSR_DEFAULT_SCALE;
+	}
+
+	private int fsrSharp() {
+		return Math.max(0, Math.min(100, prefs.getInt(K_FSR_SHARP + fsrGameKey(), FSR_DEFAULT_SHARP)));
+	}
+
+	private static String fsrScaleLabel(int scale10) {
+		return scale10 % 10 == 0 ? (scale10 / 10) + "×" : String.format(Locale.ROOT, "%.1f×", scale10 / 10f);
+	}
+
+	private static String sharpLabel(int sharp) {
+		return sharp + " %";
+	}
+
+	/** Earlier versions had FSR as one of the visual effects: carry it over to the new option. */
+	private void migrateFsrEffect() {
+		if ("fsr".equals(prefs.getString(K_EFFECT, null))) {
+			prefs.edit().putString(K_EFFECT, "none").putBoolean(K_FSR_ON + fsrGameKey(), true).apply();
+		}
+	}
+
+	/** Size of the game picture on this screen (aspect kept, filling the short side), landscape. */
+	private int[] gameSizeOnScreen() {
+		DisplayMetrics dm = new DisplayMetrics();
+		getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+		int longSide = Math.max(dm.widthPixels, dm.heightPixels);
+		int shortSide = Math.min(dm.widthPixels, dm.heightPixels);
+		if (longSide * PSP_H >= shortSide * PSP_W) {
+			return new int[] { Math.round(shortSide * (float) PSP_W / PSP_H), shortSide };
+		}
+		return new int[] { longSide, Math.round(longSide * (float) PSP_H / PSP_W) };
+	}
+
+	private void refreshAmdButton() {
+		if (amdButtonStatus == null) {
+			return;
+		}
+		amdButtonStatus.setText(fsrOn()
+			? "FSR 1.0 activo · " + fsrScaleLabel(fsrScale()) + " · nitidez " + sharpLabel(fsrSharp())
+			: "AMD FSR 1.0 · apagado · toca para configurarlo");
+		amdButtonStatus.setTextColor(fsrOn() ? C_OK : C_MUTED);
+	}
+
+	private void refreshFsr() {
+		boolean on = fsrOn();
+		fsrSwitch.setChecked(on);
+		fsrOptions.setAlpha(on ? 1f : 0.45f);
+		int scale = fsrScale();
+		for (int i = 0; i < FSR_SCALES.length; i++) {
+			styleChip(fsrScaleChips[i], FSR_SCALES[i] == scale);
+		}
+		int sharp = fsrSharp();
+		if (fsrSeek.getProgress() != sharp) {
+			fsrSeek.setProgress(sharp);
+		}
+		fsrSharpValue.setText(sharpLabel(sharp));
+
+		// What FSR will do with the current internal resolution (same rule as patches/0005).
+		int res = clampRes(prefs.getInt(K_RES, recommendedRes));
+		int rw = PSP_W * res, rh = PSP_H * res;
+		int[] screen = gameSizeOnScreen();
+		float room = Math.min(screen[0] / (float) rw, screen[1] / (float) rh);
+		float wanted = scale / 10f;
+		float actual = Math.max(1f, Math.min(wanted, room));
+		// A few pixels short of the full factor (e.g. 1.98x) is still "the factor you chose".
+		boolean capped = actual < wanted * 0.97f;
+		int ow = Math.round(rw * actual), oh = Math.round(rh * actual);
+		fsrInfo.setText("Resolución interna " + res + "× (" + rw + " × " + rh + ") → FSR "
+			+ (capped ? String.format(Locale.ROOT, "%.2f×", actual) : fsrScaleLabel(scale))
+			+ " → " + ow + " × " + oh + "\nEl juego ocupa " + screen[0] + " × " + screen[1] + " en tu pantalla.");
+		String warn = null;
+		if (room <= 1.05f) {
+			warn = "⚠ Tu resolución interna ya llena la pantalla: FSR aporta poco aquí (solo la nitidez de RCAS) y gasta batería. "
+				+ "Para que FSR rinda, baja la resolución interna a " + Math.max(1, Math.round(screen[1] / (float) PSP_H / 2f)) + "× o menos.";
+		} else if (room < 1.5f) {
+			warn = String.format(Locale.ROOT, "⚠ La resolución interna ya es alta: FSR solo puede escalar ×%.2f antes de llegar al tamaño de tu pantalla, así que aporta poco. "
+				+ "Baja la resolución interna para dejarle más trabajo a FSR.", room);
+		} else if (capped) {
+			warn = String.format(Locale.ROOT, "El factor se queda en ×%.2f: la imagen no puede ser más grande que tu pantalla.", actual);
+		}
+		fsrWarn.setText(warn == null ? "" : warn);
+		fsrWarn.setVisibility(warn == null ? View.GONE : View.VISIBLE);
+
+		String id = prefs.getString(K_ID, null);
+		fsrNote.setText((id == null ? "Se guarda para cada juego." : "Se guarda solo para este juego (" + id + ").")
+			+ " Compatible con los estados guardados: FSR cambia la imagen que ves, no la partida, así que tus estados cargan igual con FSR encendido o apagado."
+			+ (on ? " Mientras FSR esté activo, el efecto visual elegido arriba queda en pausa." : ""));
+
+		for (View row : effectRows) {
+			row.setAlpha(on ? 0.45f : 1f);
+		}
+		refreshAmdButton();
+	}
+
+	/** The "BETA · AMD GRAPHICS" button: scrolls to the FSR settings and highlights them. */
+	private void showFsrPanel() {
+		if (mainScroll == null || fsrPanel == null) {
+			return;
+		}
+		int y = 0;
+		View v = fsrPanel;
+		View content = mainScroll.getChildAt(0);
+		while (v != null && v != content) {
+			y += v.getTop();
+			v = v.getParent() instanceof View ? (View) v.getParent() : null;
+		}
+		mainScroll.smoothScrollTo(0, Math.max(0, y - dp(16)));
+		fsrPanel.animate().alpha(0.4f).setDuration(160).withEndAction(() -> fsrPanel.animate().alpha(1f).setDuration(320).start()).start();
+	}
+
+	private void showCredits() {
+		ScrollView sv = new ScrollView(this);
+		TextView t = text(CREDITS, 13, C_TEXT, false);
+		t.setPadding(dp(20), dp(12), dp(20), dp(12));
+		t.setTextIsSelectable(true);
+		sv.addView(t);
+		new AlertDialog.Builder(this)
+			.setTitle("Créditos y licencias")
+			.setView(sv)
+			.setPositiveButton("Cerrar", null)
+			.show();
+	}
+
+	private static final String AMD_MIT_LICENSE =
+		"Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.\n\n"
+		+ "Permission is hereby granted, free of charge, to any person obtaining a copy "
+		+ "of this software and associated documentation files (the \"Software\"), to deal "
+		+ "in the Software without restriction, including without limitation the rights "
+		+ "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell "
+		+ "copies of the Software, and to permit persons to whom the Software is "
+		+ "furnished to do so, subject to the following conditions:\n\n"
+		+ "The above copyright notice and this permission notice shall be included in "
+		+ "all copies or substantial portions of the Software.\n\n"
+		+ "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
+		+ "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
+		+ "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
+		+ "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
+		+ "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, "
+		+ "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN "
+		+ "THE SOFTWARE.";
+
+	private static final String CREDITS =
+		"GGXX ΛC+ para Android\n"
+		+ "App no oficial para jugar tu copia de Guilty Gear XX Accent Core Plus (PSP).\n\n"
+		+ "■ PPSSPP\n"
+		+ "Motor de emulación de PSP, de Henrik Rydgård y colaboradores. Licencia GPL 2.0 o posterior. "
+		+ "Esta app es PPSSPP con cambios, distribuida bajo la misma licencia. ppsspp.org\n\n"
+		+ "■ AMD FidelityFX Super Resolution 1.0 (FSR 1)\n"
+		+ "Los filtros EASU y RCAS de «BETA · AMD GRAPHICS» están adaptados del código de FSR 1.0 de AMD "
+		+ "(github.com/GPUOpen-Effects/FidelityFX-FSR), publicado con la licencia MIT:\n\n"
+		+ AMD_MIT_LICENSE + "\n\n"
+		+ "AMD y FidelityFX son marcas de Advanced Micro Devices, Inc. Esta app no está afiliada ni respaldada por AMD.\n\n"
+		+ "■ Efecto «IA» (NNEDI3)\n"
+		+ "Pesos de la red NNEDI3 (tritical), tomados de los shaders de PPSSPP.\n\n"
+		+ "■ Letras P, K, S, HS y D\n"
+		+ "Dibujadas con Roboto Condensed (Google), licencia Apache 2.0, que ya incluye PPSSPP.\n\n"
+		+ "■ Guilty Gear\n"
+		+ "Guilty Gear es una marca de Arc System Works. Este proyecto no está afiliado ni respaldado por Arc System Works "
+		+ "y no incluye ningún archivo del juego.";
 
 	/** A special move button's input: chosen in the launcher, or the character's default. */
 	private String gestureMove(int id, int slot) {
@@ -1503,6 +1743,7 @@ public class LauncherActivity extends Activity {
 
 	private View buildUi() {
 		final ScrollView scroll = new ScrollView(this);
+		mainScroll = scroll;
 		scroll.setBackgroundColor(C_BG);
 		scroll.setFillViewport(true);
 		if (Build.VERSION.SDK_INT >= 35) {
@@ -1604,9 +1845,11 @@ public class LauncherActivity extends Activity {
 				TextView chip = chip(effect.label);
 				chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
 				chip.setOnClickListener(v -> {
-					prefs.edit().putString(K_EFFECT, effect.id).apply();
+					// Effects and FSR are one or the other.
+					prefs.edit().putString(K_EFFECT, effect.id).putBoolean(K_FSR_ON + fsrGameKey(), false).apply();
 					refreshEffect();
 					refreshResolution();
+					refreshFsr();
 				});
 				effectChips[index] = chip;
 				LinearLayout.LayoutParams lp = weighted(c == 0 ? 0 : dp(4), c == 3 ? 0 : dp(4));
@@ -1614,7 +1857,36 @@ public class LauncherActivity extends Activity {
 				chips.addView(chip, lp);
 			}
 			effects.addView(chips);
+			effectRows.add(chips);
 		}
+
+		// The one special option: AMD FSR 1.0 (its settings are under "Gráficos").
+		LinearLayout amdButton = new LinearLayout(this);
+		amdButton.setOrientation(LinearLayout.VERTICAL);
+		amdButton.setGravity(Gravity.CENTER);
+		amdButton.setPadding(dp(14), dp(12), dp(14), dp(12));
+		GradientDrawable amdBg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] { 0xFF2A0B10, 0xFF12090B });
+		amdBg.setCornerRadius(dp(12));
+		amdBg.setStroke(dp(1.5f), C_ACCENT);
+		GradientDrawable amdMask = new GradientDrawable();
+		amdMask.setColor(Color.WHITE);
+		amdMask.setCornerRadius(dp(12));
+		amdButton.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), amdBg, amdMask));
+		makeClickable(amdButton);
+		TextView amdTitle = text("BETA · AMD GRAPHICS", 16, Color.WHITE, true);
+		amdTitle.setLetterSpacing(0.16f);
+		amdTitle.setGravity(Gravity.CENTER);
+		amdButton.addView(amdTitle);
+		amdButtonStatus = text("", 12, C_MUTED, false);
+		amdButtonStatus.setGravity(Gravity.CENTER);
+		amdButtonStatus.setPadding(0, dp(2), 0, 0);
+		amdButton.addView(amdButtonStatus);
+		amdButton.setOnClickListener(v -> showFsrPanel());
+		LinearLayout.LayoutParams amdParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		amdParams.topMargin = dp(4);
+		amdParams.bottomMargin = dp(10);
+		effects.addView(amdButton, amdParams);
+
 		effectPreview = new ImageView(this);
 		effectPreview.setAdjustViewBounds(true);
 		effectPreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -1975,6 +2247,109 @@ public class LauncherActivity extends Activity {
 		fpsSwitch = switchRow(graphics, "Mostrar FPS", "Contador de fotogramas por segundo en una esquina.");
 		fpsSwitch.setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(K_FPS, checked).apply());
 
+		// AMD FSR 1.0 (beta): shaders in assets/shaders (acplus_fsr1_*.fsh), sizing in patches/0005.
+		fsrPanel = new LinearLayout(this);
+		fsrPanel.setOrientation(LinearLayout.VERTICAL);
+		fsrPanel.setPadding(dp(14), dp(14), dp(14), dp(14));
+		GradientDrawable fsrBg = new GradientDrawable();
+		fsrBg.setColor(0xFF1A0E11);
+		fsrBg.setCornerRadius(dp(12));
+		fsrBg.setStroke(dp(1), 0xFF5A1F28);
+		fsrPanel.setBackground(fsrBg);
+		LinearLayout.LayoutParams fsrParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		fsrParams.topMargin = dp(18);
+		graphics.addView(fsrPanel, fsrParams);
+		TextView fsrBadge = text("BETA · AMD GRAPHICS", 12, C_ACCENT, true);
+		fsrBadge.setLetterSpacing(0.18f);
+		fsrPanel.addView(fsrBadge);
+		TextView fsrTitle = text("AMD FidelityFX Super Resolution 1.0", 16, C_TEXT, true);
+		fsrTitle.setPadding(0, dp(4), 0, dp(12));
+		fsrPanel.addView(fsrTitle);
+		fsrSwitch = switchRow(fsrPanel, "Activar FSR",
+			"EASU escala la imagen del juego y RCAS le devuelve la nitidez. Solo trabaja sobre la imagen final: los sprites no se tocan.");
+		fsrSwitch.setOnCheckedChangeListener((b, checked) -> {
+			if (checked == fsrOn()) {
+				return;
+			}
+			prefs.edit().putBoolean(K_FSR_ON + fsrGameKey(), checked).apply();
+			refreshFsr();
+			refreshEffect();
+			refreshResolution();
+		});
+		fsrOptions = new LinearLayout(this);
+		fsrOptions.setOrientation(LinearLayout.VERTICAL);
+		fsrOptions.setPadding(0, dp(14), 0, 0);
+		fsrPanel.addView(fsrOptions);
+
+		fsrOptions.addView(text("Factor de escala", 15, C_TEXT, true));
+		LinearLayout fsrScaleRow = new LinearLayout(this);
+		fsrScaleRow.setOrientation(LinearLayout.HORIZONTAL);
+		fsrScaleRow.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < FSR_SCALES.length; i++) {
+			final int value = FSR_SCALES[i];
+			fsrScaleChips[i] = chip(FSR_SCALE_LABELS[i]);
+			fsrScaleChips[i].setOnClickListener(v -> {
+				prefs.edit().putInt(K_FSR_SCALE + fsrGameKey(), value).apply();
+				refreshFsr();
+				refreshEffect();
+				refreshResolution();
+			});
+			fsrScaleRow.addView(fsrScaleChips[i], weighted(i == 0 ? 0 : dp(4), i == FSR_SCALES.length - 1 ? 0 : dp(4)));
+		}
+		fsrOptions.addView(fsrScaleRow);
+
+		LinearLayout sharpRow = new LinearLayout(this);
+		sharpRow.setOrientation(LinearLayout.HORIZONTAL);
+		sharpRow.setPadding(0, dp(16), 0, 0);
+		sharpRow.addView(text("Nitidez RCAS", 15, C_TEXT, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		fsrSharpValue = text("", 15, C_ACCENT, true);
+		sharpRow.addView(fsrSharpValue);
+		fsrOptions.addView(sharpRow);
+		fsrSeek = new SeekBar(this);
+		fsrSeek.setMax(100);
+		if (Build.VERSION.SDK_INT >= 21) {
+			fsrSeek.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
+			fsrSeek.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
+			fsrSeek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF4A4A55));
+		}
+		fsrSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+			@Override
+			public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+				if (!fromUser) {
+					return;
+				}
+				prefs.edit().putInt(K_FSR_SHARP + fsrGameKey(), progress).apply();
+				fsrSharpValue.setText(sharpLabel(progress));
+				refreshAmdButton();
+			}
+
+			@Override
+			public void onStartTrackingTouch(SeekBar bar) {}
+
+			@Override
+			public void onStopTrackingTouch(SeekBar bar) {}
+		});
+		LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		seekParams.topMargin = dp(6);
+		fsrOptions.addView(fsrSeek, seekParams);
+		TextView sharpHint = text("0 % = sin afinar · 100 % = el máximo de AMD. Lo normal es 70–90 %.", 12, C_MUTED, false);
+		fsrOptions.addView(sharpHint);
+
+		fsrInfo = text("", 13, C_TEXT, false);
+		fsrInfo.setPadding(0, dp(14), 0, 0);
+		fsrOptions.addView(fsrInfo);
+		fsrWarn = text("", 13, C_WARN, false);
+		fsrWarn.setPadding(0, dp(8), 0, 0);
+		fsrOptions.addView(fsrWarn);
+		fsrNote = text("", 12, C_MUTED, false);
+		fsrNote.setPadding(0, dp(10), 0, 0);
+		fsrPanel.addView(fsrNote);
+		TextView fsrCredits = outlineButton("Créditos y licencia de AMD");
+		fsrCredits.setOnClickListener(v -> showCredits());
+		LinearLayout.LayoutParams fsrCreditsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		fsrCreditsParams.topMargin = dp(12);
+		fsrPanel.addView(fsrCredits, fsrCreditsParams);
+
 		// Play
 		playButton = filledButton("JUGAR", 20);
 		playButton.setLetterSpacing(0.15f);
@@ -1993,6 +2368,12 @@ public class LauncherActivity extends Activity {
 		footer.setGravity(Gravity.CENTER_HORIZONTAL);
 		footer.setPadding(dp(8), dp(18), dp(8), 0);
 		col.addView(footer);
+		TextView credits = text("Créditos y licencias", 13, C_MUTED, true);
+		credits.setGravity(Gravity.CENTER_HORIZONTAL);
+		credits.setPadding(dp(8), dp(10), dp(8), dp(10));
+		makeClickable(credits);
+		credits.setOnClickListener(v -> showCredits());
+		col.addView(credits);
 
 		return scroll;
 	}
