@@ -89,18 +89,19 @@ index 87f9f4d..6208e33 100644
  	void UpdateAfterSettingAutoFrameSkip();
  	void NotifyUpdatedCpuCore();
 diff --git a/UI/EmuScreen.cpp b/UI/EmuScreen.cpp
-index b294842..1965e4c 100644
+index b294842..3cf2b12 100644
 --- a/UI/EmuScreen.cpp
 +++ b/UI/EmuScreen.cpp
-@@ -83,6 +83,7 @@ using namespace std::placeholders;
+@@ -83,6 +83,8 @@ using namespace std::placeholders;
  #include "UI/MainScreen.h"
  #include "UI/Background.h"
  #include "UI/EmuScreen.h"
 +#include "UI/AcPlusProfiles.h"
++#include "UI/AcPlusHitboxes.h"
  #include "UI/DevScreens.h"
  #include "UI/GameInfoCache.h"
  #include "UI/BaseScreens.h"
-@@ -450,6 +451,8 @@ void EmuScreen::bootComplete() {
+@@ -450,6 +452,8 @@ void EmuScreen::bootComplete() {
  
  EmuScreen::~EmuScreen() {
  	g_controlMapper.RemoveListener(this);
@@ -109,7 +110,7 @@ index b294842..1965e4c 100644
  
  	if (imguiInited_) {
  		ImGui_ImplThin3d_Shutdown();
-@@ -514,6 +517,9 @@ void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
+@@ -514,6 +518,9 @@ void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
  		return;
  	}
  
@@ -119,7 +120,7 @@ index b294842..1965e4c 100644
  	// Returning to the PauseScreen, unless we're stepping, means we should go back to controls.
  	UI::EnableFocusMovement(false);
  
-@@ -1492,6 +1498,11 @@ void EmuScreen::update() {
+@@ -1492,6 +1499,15 @@ void EmuScreen::update() {
  	if (!PSP_IsInited())
  		return;
  
@@ -127,7 +128,23 @@ index b294842..1965e4c 100644
 +	if (!bootPending_ && AcPlusProfiles::Update()) {
 +		RecreateViews();
 +	}
++	// Launcher build: hitbox / hurtbox viewer.
++	if (!bootPending_) {
++		AcPlusHitboxes::Update();
++	}
 +
  	double now = time_now_d();
  
  	DisplayLayoutConfig &config = g_Config.GetDisplayLayoutConfig(GetDeviceOrientation());
+@@ -1974,6 +1990,11 @@ void EmuScreen::renderUI() {
+ 	// This sets up some important states but not the viewport.
+ 	ctx->Begin();
+ 
++	// Launcher build: hitboxes go over the game picture but under the touch controls.
++	if (PSP_IsInited() && !bootPending_) {
++		AcPlusHitboxes::Draw(ctx, g_Config.GetDisplayLayoutConfig(GetDeviceOrientation()));
++	}
++
+ 	if (root_) {
+ 		UI::LayoutViewHierarchy(*ctx, RootMargins(), root_, LayoutMode(), UseImmersiveMode());
+ 		root_->Draw(*ctx);

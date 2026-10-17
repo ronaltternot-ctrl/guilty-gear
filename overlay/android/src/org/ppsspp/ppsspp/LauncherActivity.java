@@ -82,6 +82,18 @@ public class LauncherActivity extends Activity {
 	private static final String K_JOIN_CODE = "net_join_code";
 	private static final String K_NICK = "net_nickname";
 	private static final String K_NET_SERVER = "net_server";
+	private static final String K_HB_ENABLED = "hitbox_enabled";
+	private static final String K_HB_HURT = "hitbox_hurt";
+	private static final String K_HB_HIT = "hitbox_hit";
+	private static final String K_HB_PIVOT = "hitbox_pivot";
+	private static final String K_HB_PROJ = "hitbox_projectiles";
+	private static final String K_HB_MANUAL = "hitbox_manual";
+
+	/** Hitbox viewer parts, in the order of the switches; ini keys read by UI/AcPlusHitboxes.h. */
+	private static final String[] HB_KEYS = { K_HB_HURT, K_HB_HIT, K_HB_PIVOT, K_HB_PROJ };
+	private static final String[] HB_INI_KEYS = { "Hurtboxes", "Hitboxes", "Pivots", "Projectiles" };
+	/** Manual detection values that can be pasted in the launcher (see AcHitbox::Settings). */
+	private static final String[] HB_MANUAL_KEYS = { "P1", "Stride", "BoxPtr", "BoxCount", "Pivot", "CameraCenter", "Scale", "GroundY" };
 
 	private static final String NET_OFF = "off";
 	private static final String NET_HOST = "host";
@@ -202,6 +214,11 @@ public class LauncherActivity extends Activity {
 	private TextView side1p;
 	private TextView side2p;
 	private TextView profilesStatus;
+	private Switch hitboxSwitch;
+	private LinearLayout hitboxOptions;
+	private final Switch[] hitboxParts = new Switch[HB_KEYS.length];
+	private TextView hitboxStatus;
+	private EditText hitboxManual;
 	private final TextView[] netChips = new TextView[NET_MODES.length];
 	private EditText nickInput;
 	private LinearLayout netHostPanel;
@@ -555,6 +572,12 @@ public class LauncherActivity extends Activity {
 				ini.append(id).append(" = ").append(s).append('\n');
 			}
 		}
+		ini.append("[Hitboxes]\n")
+			.append("Enabled = ").append(prefs.getBoolean(K_HB_ENABLED, false) ? "True" : "False").append('\n');
+		for (int i = 0; i < HB_KEYS.length; i++) {
+			ini.append(HB_INI_KEYS[i]).append(" = ").append(prefs.getBoolean(HB_KEYS[i], true) ? "True" : "False").append('\n');
+		}
+		ini.append(hitboxManualLines(prefs.getString(K_HB_MANUAL, "")));
 		writeText(new File(getFilesDir(), "acplus.ini"), ini.toString());
 	}
 
@@ -789,6 +812,7 @@ public class LauncherActivity extends Activity {
 		refreshEffect();
 		refreshProfiles();
 		refreshNetwork();
+		refreshHitboxes();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -941,6 +965,83 @@ public class LauncherActivity extends Activity {
 		profilesStatus.setText(s.toString());
 	}
 
+	/** Diagnostics written by the emulator while the viewer is on (UI/AcPlusHitboxes.h). */
+	private File hitboxReportFile() {
+		return new File(memstickDir(), "PSP/SYSTEM/acplus_hitbox_report.txt");
+	}
+
+	/** The "status:" line of the last report, or null. */
+	private String lastHitboxStatus() {
+		File f = hitboxReportFile();
+		if (!f.isFile()) {
+			return null;
+		}
+		try (java.io.BufferedReader r = new java.io.BufferedReader(
+				new java.io.InputStreamReader(new java.io.FileInputStream(f), StandardCharsets.UTF_8))) {
+			for (int i = 0; i < 4; i++) {
+				String line = r.readLine();
+				if (line == null) {
+					break;
+				}
+				if (line.startsWith("status:")) {
+					return line.substring(7).replace("Hitboxes:", "").trim();
+				}
+			}
+		} catch (IOException e) {
+			Log.w(TAG, "Cannot read hitbox report", e);
+		}
+		return null;
+	}
+
+	private void refreshHitboxes() {
+		boolean on = prefs.getBoolean(K_HB_ENABLED, false);
+		hitboxSwitch.setChecked(on);
+		for (int i = 0; i < HB_KEYS.length; i++) {
+			hitboxParts[i].setChecked(prefs.getBoolean(HB_KEYS[i], true));
+			hitboxParts[i].setEnabled(on);
+		}
+		hitboxManual.setEnabled(on);
+		hitboxOptions.setAlpha(on ? 1f : 0.45f);
+
+		StringBuilder s = new StringBuilder();
+		if (!isProfileGame()) {
+			s.append("⚠ Tu copia es ").append(prefs.getString(K_ID, "")).append(". El visor solo funciona con la versión americana (ULUS-10409).\n\n");
+		}
+		s.append("Experimental. Al empezar cada combate tarda unos segundos en encontrar las cajas: el progreso sale abajo a la izquierda del juego. "
+			+ "Muévete un poco hacia los lados para que encuentre la cámara. Funciona mejor en «Training».");
+		String last = lastHitboxStatus();
+		if (last != null) {
+			s.append("\n\nÚltima partida: ").append(last.isEmpty() ? "funcionando" : last).append('.');
+		}
+		s.append("\n\nSi las cajas no coinciden con los personajes, guarda un estado en ese momento (Atrás → Guardar estado), sal y pulsa «Enviar informe del visor».");
+		hitboxStatus.setText(s.toString());
+	}
+
+	/** Turns "P1=0x0913D000 BoxPtr=0x54; Scale=0.0075" into ini lines, keeping known keys only. */
+	static String hitboxManualLines(String text) {
+		StringBuilder out = new StringBuilder();
+		if (text == null) {
+			return "";
+		}
+		for (String token : text.split("[\\s;,]+")) {
+			int eq = token.indexOf('=');
+			if (eq <= 0) {
+				continue;
+			}
+			String key = token.substring(0, eq).trim();
+			String value = token.substring(eq + 1).trim();
+			if (!value.matches("-?(0[xX][0-9a-fA-F]+|[0-9]+(\\.[0-9]+)?)")) {
+				continue;
+			}
+			for (String known : HB_MANUAL_KEYS) {
+				if (known.equalsIgnoreCase(key)) {
+					out.append(known).append(" = ").append(value).append('\n');
+				}
+			}
+		}
+		return out.toString();
+	}
+
 	private void refreshNetwork() {
 		String mode = prefs.getString(K_NET_MODE, NET_OFF);
 		for (int i = 0; i < NET_MODES.length; i++) {
@@ -1045,16 +1146,32 @@ public class LauncherActivity extends Activity {
 		startActivity(Intent.createChooser(send, "Compartir código de sala"));
 	}
 
-	/** Shares the emulator's save states (and their screenshots) through Android's share sheet. */
-	private void shareSaveStates() {
-		File dir = new File(memstickDir(), "PSP/PPSSPP_STATE");
-		File[] files = dir.listFiles((d, name) -> name.endsWith(".ppst") || name.endsWith(".jpg"));
-		if (files == null || files.length == 0) {
-			showMessage("Todavía no hay estados guardados",
-				"Juega en «Training» y guarda estados desde el menú de pausa (botón Atrás → «Guardar estado»). Después vuelve aquí.");
+	/**
+	 * Shares the viewer report plus the newest save states (and their screenshots), so a wrong
+	 * detection can be checked against the real game memory.
+	 */
+	private void shareHitboxReport() {
+		ArrayList<File> files = new ArrayList<>();
+		File report = hitboxReportFile();
+		if (report.isFile()) {
+			files.add(report);
+		}
+		File[] states = new File(memstickDir(), "PSP/PPSSPP_STATE").listFiles((d, name) -> name.endsWith(".ppst") || name.endsWith(".jpg"));
+		if (states != null) {
+			java.util.Arrays.sort(states, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+			for (int i = 0; i < states.length && i < 8; i++) {
+				files.add(states[i]);
+			}
+		}
+		if (files.isEmpty()) {
+			showMessage("Todavía no hay informe",
+				"Activa el visor, juega un combate unos segundos y vuelve aquí. Si las cajas salen mal, guarda también un estado en ese momento (Atrás → «Guardar estado»).");
 			return;
 		}
-		java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+		shareFiles(files, "Informe del visor de hitboxes de GGXX AC+", "Enviar informe del visor");
+	}
+
+	private void shareFiles(List<File> files, String text, String title) {
 		ArrayList<Uri> uris = new ArrayList<>();
 		long total = 0;
 		String authority = getPackageName() + ".acplus.files";
@@ -1074,12 +1191,16 @@ public class LauncherActivity extends Activity {
 			return;
 		}
 		Intent send = new Intent(Intent.ACTION_SEND_MULTIPLE);
-		send.setType("application/octet-stream");
+		send.setType("*/*");
 		send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
-		send.putExtra(Intent.EXTRA_TEXT, "Estados guardados de GGXX AC+ para el visor de hitboxes");
+		send.putExtra(Intent.EXTRA_TEXT, text);
 		send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 		Log.i(TAG, "Sharing " + uris.size() + " files, " + total + " bytes");
-		startActivity(Intent.createChooser(send, "Enviar estados guardados (" + (total / (1024 * 1024) + 1) + " MB)"));
+		try {
+			startActivity(Intent.createChooser(send, title + " (" + (total / (1024 * 1024) + 1) + " MB)"));
+		} catch (ActivityNotFoundException e) {
+			showMessage("Error", "No hay ninguna app para enviar archivos.");
+		}
 	}
 
 	private String characterStyleLabel(int id) {
@@ -1533,23 +1654,43 @@ public class LauncherActivity extends Activity {
 		netNote.setPadding(0, dp(8), 0, 0);
 		net.addView(netNote);
 
-		// Hitbox viewer research: send save states to find where the game keeps its boxes.
-		LinearLayout hitbox = section(col, "VISOR DE HITBOXES · EN PREPARACIÓN");
-		hitbox.addView(text("Para dibujar las cajas de golpe (hitboxes) y de daño (hurtboxes) necesito saber dónde las guarda tu copia del juego en memoria. Eso se descubre con estados guardados:", 13, C_MUTED, false));
-		TextView hitboxSteps = text(
-			"1. Juega en «Training» con Sol contra cualquier rival.\n"
-			+ "2. En cada momento, pulsa Atrás → elige otra ranura → «Guardar estado»:\n"
-			+ "   • Ranura 1: Sol quieto de pie.\n"
-			+ "   • Ranura 2: Sol agachado.\n"
-			+ "   • Ranura 3: Sol en el aire (saltando).\n"
-			+ "   • Ranura 4: Sol haciendo S de pie, con la espada extendida.\n"
-			+ "3. Sal del juego, pulsa «Enviar estados guardados» y mándalos al chat donde se hizo esta app.",
-			13, C_TEXT, false);
-		hitboxSteps.setPadding(0, dp(10), 0, dp(12));
-		hitbox.addView(hitboxSteps);
-		TextView sendStates = outlineButton("Enviar estados guardados");
-		sendStates.setOnClickListener(v -> shareSaveStates());
-		hitbox.addView(sendStates, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		// Hitbox viewer (drawn by the emulator, UI/AcPlusHitboxes.h)
+		LinearLayout hitbox = section(col, "VISOR DE HITBOXES");
+		hitboxSwitch = switchRow(hitbox, "Mostrar hitboxes y hurtboxes",
+			"Dibuja encima del juego las cajas de golpe y de daño de cada personaje mientras juegas.");
+		hitboxSwitch.setOnCheckedChangeListener((b, checked) -> {
+			prefs.edit().putBoolean(K_HB_ENABLED, checked).apply();
+			refreshHitboxes();
+		});
+		hitboxOptions = new LinearLayout(this);
+		hitboxOptions.setOrientation(LinearLayout.VERTICAL);
+		hitboxOptions.setPadding(0, dp(16), 0, 0);
+		hitbox.addView(hitboxOptions);
+		String[][] hitboxPartLabels = {
+			{ "Hurtboxes · verde", "Donde el personaje recibe daño (en azul claro, otras zonas de daño)." },
+			{ "Hitboxes · rojo", "Lo que golpea durante un ataque." },
+			{ "Posición · cruz blanca", "El punto de apoyo de cada personaje." },
+			{ "Proyectiles", "Bolas de fuego, invocaciones y otros objetos: rojo si golpean, naranja si se pueden golpear." },
+		};
+		for (int i = 0; i < HB_KEYS.length; i++) {
+			final String key = HB_KEYS[i];
+			hitboxParts[i] = switchRow(hitboxOptions, hitboxPartLabels[i][0], hitboxPartLabels[i][1]);
+			hitboxParts[i].setOnCheckedChangeListener((b, checked) -> prefs.edit().putBoolean(key, checked).apply());
+			hitboxOptions.addView(new View(this), new LinearLayout.LayoutParams(1, dp(12)));
+		}
+		hitboxStatus = text("", 13, C_MUTED, false);
+		hitboxStatus.setPadding(0, dp(4), 0, dp(12));
+		hitboxOptions.addView(hitboxStatus);
+		TextView sendReport = outlineButton("Enviar informe del visor");
+		sendReport.setOnClickListener(v -> shareHitboxReport());
+		hitboxOptions.addView(sendReport, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		hitboxManual = input("Ajuste manual (solo si te lo piden)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 160);
+		hitboxManual.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+		hitboxManual.setText(prefs.getString(K_HB_MANUAL, ""));
+		hitboxManual.addTextChangedListener(new SimpleWatcher(s -> prefs.edit().putString(K_HB_MANUAL, s.trim()).apply()));
+		LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		manualParams.topMargin = dp(12);
+		hitboxOptions.addView(hitboxManual, manualParams);
 
 		// Graphics
 		LinearLayout graphics = section(col, "GRÁFICOS");
