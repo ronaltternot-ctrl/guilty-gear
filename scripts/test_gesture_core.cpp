@@ -233,6 +233,32 @@ int main() {
 		Motion m = ParseMotion("236HS", true);
 		Expect("BlazBlue moves don't take HS", m.valid ? "valid" : "invalid", "invalid");
 	}
+	{
+		// KOF: square A, cross B, triangle C, circle D.
+		Rig r;
+		const ButtonMap kof = KofMap();
+		r.rec.SetButtonMap(kof);
+		r.rec.SetMove(0, ParseMotion("236A", &kof));
+		r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		r.Wait(0.2); r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		r.Wait(0.2); r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		r.Wait(0.2); r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		Expect("KOF: chain A, B, C, D", Run(r.seq, 16), "+P*3 . +K*3 . +S*3 . +HS*3 .");
+		r.Wait(1.0);
+		r.Down(0, 300, 250); r.Wait(0.03); r.Down(1, 360, 250); r.Wait(0.05); r.Up(0, 300, 250); r.Up(1, 360, 250);
+		Expect("KOF: two-finger tap = CD", Run(r.seq, 5), "+S+HS*3 .*2");
+		r.Wait(0.3);
+		r.Down(0, 300, 250); r.Down(1, 360, 250); r.Wait(0.05); r.Move(0, 255, 250); r.Move(1, 315, 250);
+		Expect("KOF: two-finger swipe left = throw C", Run(r.seq, 6), "L L+S*3 .*2");
+		r.Up(0, 255, 250); r.Up(1, 315, 250);
+		r.Down(0, 300, 250); r.Wait(0.03); r.Move(0, 303, 300); r.Up(0, 303, 300);
+		Expect("KOF: swipe down = 2D", Run(r.seq, 6), "D D+HS*3 .*2");
+		r.Down(0, 760, 350); r.Up(0, 760, 350);
+		Expect("KOF: button 236A", Run(r.seq, 9, true), "D*2 DR*2 R+P*3 .*2");
+		r.Down(0, 690, 40); r.Up(0, 690, 40);
+		Expect("KOF: small button = roll A+B", Run(r.seq, 4), "+P+K*2 .*2");
+		Expect("KOF: move letters", ParseMotion("214D", &kof).buttons == PSP_CIRCLE ? "ok" : "bad", "ok");
+	}
 	printf("failures: %d\n", failures);
 	return failures;
 }

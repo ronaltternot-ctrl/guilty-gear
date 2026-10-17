@@ -48,6 +48,16 @@ static const u32 kSelectAddress[2] = { 0x08C6BB58, 0x08C6BB5A };
 static const char *const kGameId = "ULUS10409";
 
 // BlazBlue: Calamity Trigger (US, EU, JP) and Continuum Shift II (US, EU, JP, Asia): same buttons.
+// The King of Fighters Collection: The Orochi Saga (US, EU); also any title naming KOF.
+inline bool IsKof(const std::string &id, const std::string &title) {
+	if (id == "ULUS10360" || id == "ULES01191")
+		return true;
+	std::string t;
+	for (char c : title)
+		t += (char)((c >= 'a' && c <= 'z') ? c - 32 : c);
+	return t.find("KING OF FIGHTERS") != std::string::npos || t.find("KOF") != std::string::npos;
+}
+
 inline bool IsBlazBlue(const std::string &id) {
 	static const char *const ids[] = { "ULUS10519", "ULES01497", "ULJM05613", "ULUS10579", "ULES01526", "ULJM05850", "UCAS40337" };
 	for (const char *b : ids) {
@@ -67,7 +77,9 @@ struct State {
 	float scale = 1.0f;
 	std::string moves[kCharacters + 1][4];
 	std::string movesBlazBlue[4];   // BlazBlue: one set for all characters
+	std::string movesKof[4];        // KOF: one set for all characters
 	bool blazblue = false;
+	bool kof = false;
 
 	AcGesture::Sequencer seq;
 	AcGesture::Recognizer rec{ &seq };
@@ -135,6 +147,9 @@ inline void LoadSettings() {
 	std::string bbLine;
 	if (sec->Get("MovesBB", &bbLine))
 		split(bbLine, s.movesBlazBlue);
+	std::string kofLine;
+	if (sec->Get("MovesKOF", &kofLine))
+		split(kofLine, s.movesKof);
 	s.active = enabled;
 	if (s.active)
 		g_ctrlVblankHook = &VblankHook;
@@ -173,10 +188,15 @@ inline void HidePadButtons(TouchControlConfig *c) {
 inline void ApplyMoves(int id) {
 	State &s = Get();
 	s.character = id;
-	if (s.blazblue) {
-		static const char *const defaults[4] = { "236A", "623C", "214B", "632146C" };
+	if (s.blazblue || s.kof) {
+		// One set for every character (the app doesn't read who you play in these games).
+		static const char *const bbDefaults[4] = { "236A", "623C", "214B", "632146C" };
+		static const char *const kofDefaults[4] = { "236A", "623C", "214B", "236236A" };
+		const std::string *moves = s.blazblue ? s.movesBlazBlue : s.movesKof;
+		const char *const *defaults = s.blazblue ? bbDefaults : kofDefaults;
+		const AcGesture::ButtonMap &map = s.rec.Map();
 		for (int slot = 0; slot < 4; slot++)
-			s.rec.SetMove(slot, AcGesture::ParseMotion(s.movesBlazBlue[slot].empty() ? defaults[slot] : s.movesBlazBlue[slot], true));
+			s.rec.SetMove(slot, AcGesture::ParseMotion(moves[slot].empty() ? defaults[slot] : moves[slot], &map));
 		return;
 	}
 	for (int slot = 0; slot < 4; slot++) {
@@ -195,9 +215,10 @@ inline void Update() {
 		const std::string discId = g_paramSFO.GetValueString("DISC_ID");
 		s.usGame = discId == kGameId;
 		s.blazblue = IsBlazBlue(discId);
-		s.rec.SetButtonMap(s.blazblue ? AcGesture::BlazBlueMap() : AcGesture::GuiltyGearMap());
+		s.kof = !s.blazblue && IsKof(discId, g_paramSFO.GetValueString("TITLE"));
+		s.rec.SetButtonMap(s.blazblue ? AcGesture::BlazBlueMap() : s.kof ? AcGesture::KofMap() : AcGesture::GuiltyGearMap());
 		ApplyMoves(0);
-		INFO_LOG(Log::System, "AcPlus: gestures for %s (%s)", s.blazblue ? "BlazBlue" : "Guilty Gear", discId.c_str());
+		INFO_LOG(Log::System, "AcPlus: gestures for %s (%s)", s.blazblue ? "BlazBlue" : s.kof ? "KOF" : "Guilty Gear", discId.c_str());
 	}
 
 	// Whose special moves: the player's character, once it reads the same a few times.
@@ -403,7 +424,7 @@ private:
 		case AcGesture::ACT_RC:
 		case AcGesture::ACT_BURST:
 			dc.SetFontScale(0.55f * k * 1.4f, 0.55f * k * 1.4f);
-			dc.DrawTextShadow(b.action == AcGesture::ACT_RC ? "RC" : "Burst", b.x, b.y, text, ALIGN_CENTER);
+			dc.DrawTextShadow(b.action == AcGesture::ACT_RC ? s.rec.Map().rapidCancelName : s.rec.Map().burstName, b.x, b.y, text, ALIGN_CENTER);
 			dc.SetFontScale(1.0f, 1.0f);
 			break;
 		case AcGesture::ACT_START:

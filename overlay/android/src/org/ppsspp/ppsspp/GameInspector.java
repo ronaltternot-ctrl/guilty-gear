@@ -22,7 +22,37 @@ final class GameInspector {
 
 	static final int SECTOR = 2048;
 
-	enum Match { TARGET, BLAZBLUE, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
+	enum Match { TARGET, BLAZBLUE, KOF, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
+
+	/** Games with their own controls in the app. */
+	static final int KIND_GG = 0;
+	static final int KIND_BB = 1;
+	static final int KIND_KOF = 2;
+
+	static int kind(String discId, String title) {
+		if (isBlazBlue(discId, title)) {
+			return KIND_BB;
+		}
+		if (isKof(discId, title)) {
+			return KIND_KOF;
+		}
+		return KIND_GG;
+	}
+
+	/** The King of Fighters Collection: The Orochi Saga (US, EU), or any title naming KOF. */
+	static boolean isKof(String discId, String title) {
+		if (discId != null) {
+			String id = discId.replace("-", "").replace(" ", "").toUpperCase(Locale.ROOT);
+			if (id.equals("ULUS10360") || id.equals("ULES01191")) {
+				return true;
+			}
+		}
+		if (title == null) {
+			return false;
+		}
+		String t = title.toUpperCase(Locale.ROOT);
+		return t.contains("KING OF FIGHTERS") || t.contains("KOF");
+	}
 
 	/** BlazBlue: Calamity Trigger (US, EU, JP) and Continuum Shift II (US, EU, JP, Asia). */
 	private static final String[] BLAZBLUE_IDS = { "ULUS10519", "ULES01497", "ULJM05613", "ULUS10579", "ULES01526", "ULJM05850", "UCAS40337" };
@@ -53,6 +83,9 @@ final class GameInspector {
 		Match match() {
 			if (isBlazBlue(discId, title)) {
 				return Match.BLAZBLUE;
+			}
+			if (isKof(discId, title)) {
+				return Match.KOF;
 			}
 			if (title == null) {
 				return Match.UNKNOWN;
@@ -202,17 +235,26 @@ final class GameInspector {
 	// Entry point
 
 	static Result inspect(Context context, Uri uri) throws IOException {
+		return inspect(context, uri, null);
+	}
+
+	/** Also saves the game's icon (PSP_GAME/ICON0.PNG) to iconOut when given and present. */
+	static Result inspect(Context context, Uri uri, java.io.File iconOut) throws IOException {
 		try (ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r")) {
 			if (pfd == null) {
 				throw new IOException("Could not open file");
 			}
 			try (FileInputStream stream = new FileInputStream(pfd.getFileDescriptor())) {
-				return inspect(new ChannelSource(stream.getChannel()));
+				return inspect(new ChannelSource(stream.getChannel()), iconOut);
 			}
 		}
 	}
 
-	private static Result inspect(ChannelSource raw) throws IOException {
+	static Result inspect(FileChannel channel, java.io.File iconOut) throws IOException {
+		return inspect(new ChannelSource(channel), iconOut);
+	}
+
+	private static Result inspect(ChannelSource raw, java.io.File iconOut) throws IOException {
 		byte[] header = new byte[64];
 		raw.readFully(0, header, 0, header.length);
 		String magic4 = new String(header, 0, 4, StandardCharsets.US_ASCII);
@@ -254,7 +296,40 @@ final class GameInspector {
 		if (fields == null) {
 			return new Result(format, null, null);
 		}
+		if (iconOut != null) {
+			try {
+				saveIcon(source, pspGame, iconOut);
+			} catch (IOException e) {
+				// No icon: the catalog draws one.
+			}
+		}
 		return new Result(format, fields[0], fields[1]);
+	}
+
+	/** Copies PSP_GAME/ICON0.PNG (144 x 80) out of the image. */
+	private static void saveIcon(ByteSource source, long[] pspGame, java.io.File out) throws IOException {
+		long[] icon = findEntry(source, pspGame[0], pspGame[1], "ICON0.PNG");
+		if (icon == null || icon[2] != 0 || icon[1] < 8 || icon[1] > 1024 * 1024) {
+			return;
+		}
+		byte[] png = new byte[(int) icon[1]];
+		source.readFully(icon[0] * SECTOR, png, 0, png.length);
+		if ((png[0] & 0xFF) != 0x89 || png[1] != 'P' || png[2] != 'N' || png[3] != 'G') {
+			return;
+		}
+		java.io.File dir = out.getParentFile();
+		if (dir != null && !dir.isDirectory() && !dir.mkdirs()) {
+			throw new IOException("Cannot create " + dir);
+		}
+		java.io.File tmp = new java.io.File(out.getPath() + ".tmp");
+		try (java.io.FileOutputStream os = new java.io.FileOutputStream(tmp)) {
+			os.write(png);
+		}
+		if (!tmp.renameTo(out)) {
+			if (!out.delete() || !tmp.renameTo(out)) {
+				throw new IOException("Cannot write " + out);
+			}
+		}
 	}
 
 	// ---------------------------------------------------------------------------------------

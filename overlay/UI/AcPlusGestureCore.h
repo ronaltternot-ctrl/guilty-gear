@@ -1,6 +1,6 @@
 // GGXX AC+ launcher build: touch gestures in the style of Skullgirls Mobile.
 //
-// Buttons are Guilty Gear's (P K S HS D) or BlazBlue's (A B C D): see ButtonMap.
+// Buttons are Guilty Gear's (P K S HS D), BlazBlue's or KOF's (A B C D): see ButtonMap.
 //
 //   Tap ........................ attack chain P -> K -> S -> HS (taps close together)
 //   Swipe left / right ......... dash / back dash (keep the finger down to keep running)
@@ -73,15 +73,18 @@ struct ButtonMap {
 	u32 sweep;                // swipe down (held with down)
 	const char *sweepName;
 	u32 throwButtons;         // two-finger swipe, with that direction
-	u32 rapidCancel;
-	u32 burst;
-	bool blazblue;            // move letters A B C D instead of P K S HS D
+	u32 rapidCancel;          // left small button
+	u32 burst;                // right small button
+	const char *rapidCancelName;
+	const char *burstName;
+	bool letters;             // moves are written with A B C D (not P K S HS D)
+	u32 letter[4];            // PSP buttons for A, B, C, D
 };
 
 // Guilty Gear (PSP defaults): square P, cross K, triangle S, circle HS, R Dust.
 inline ButtonMap GuiltyGearMap() {
 	return ButtonMap{ { BTN_P, BTN_K, BTN_S, BTN_HS }, 4, { "P", "K", "S", "HS" },
-		BTN_D, "D", BTN_D, "2D", BTN_HS, BTN_P | BTN_K | BTN_S, BTN_D | BTN_HS, false };
+		BTN_D, "D", BTN_D, "2D", BTN_HS, BTN_P | BTN_K | BTN_S, BTN_D | BTN_HS, "RC", "Burst", false, { 0, 0, 0, 0 } };
 }
 
 // BlazBlue (PSP defaults): square A, triangle B, circle C, cross D (Drive).
@@ -89,7 +92,18 @@ inline ButtonMap GuiltyGearMap() {
 inline ButtonMap BlazBlueMap() {
 	return ButtonMap{ { PSP_SQUARE, PSP_TRIANGLE, PSP_CIRCLE, 0 }, 3, { "A", "B", "C", "" },
 		PSP_CROSS, "D", PSP_CIRCLE, "2C", PSP_TRIANGLE | PSP_CIRCLE,
-		PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE, PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE | PSP_CROSS, true };
+		PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE, PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE | PSP_CROSS, "RC", "Burst",
+		true, { PSP_SQUARE, PSP_TRIANGLE, PSP_CIRCLE, PSP_CROSS } };
+}
+
+// The King of Fighters (SNK's PlayStation default): square A (weak punch), cross B (weak kick),
+// triangle C (strong punch), circle D (strong kick). Two fingers = CD blowback, throw = C,
+// small buttons: roll (A+B) and MAX / power charge (A+B+C).
+inline ButtonMap KofMap() {
+	return ButtonMap{ { PSP_SQUARE, PSP_CROSS, PSP_TRIANGLE, PSP_CIRCLE }, 4, { "A", "B", "C", "D" },
+		PSP_TRIANGLE | PSP_CIRCLE, "CD", PSP_CIRCLE, "2D", PSP_TRIANGLE,
+		PSP_SQUARE | PSP_CROSS, PSP_SQUARE | PSP_CROSS | PSP_TRIANGLE, "Roll", "MAX",
+		true, { PSP_SQUARE, PSP_CROSS, PSP_TRIANGLE, PSP_CIRCLE } };
 }
 
 inline u32 CancelOpposites(u32 m) {
@@ -135,8 +149,9 @@ struct Motion {
 	bool valid = false;
 };
 
-// blazblue: buttons are A B C D (square, triangle, circle, cross) instead of P K S HS D.
-inline Motion ParseMotion(const std::string &spec, bool blazblue = false) {
+// With a map that uses letters (BlazBlue, KOF), buttons are A B C D; otherwise P K S HS D.
+inline Motion ParseMotion(const std::string &spec, const ButtonMap *map = nullptr) {
+	const bool letters = map && map->letters;
 	Motion m;
 	std::string s;
 	for (char c : spec) {
@@ -155,14 +170,10 @@ inline Motion ParseMotion(const std::string &spec, bool blazblue = false) {
 		i++;
 	}
 	while (i < s.size()) {
-		if (blazblue) {
-			switch (s[i]) {
-			case 'A': m.buttons |= PSP_SQUARE; break;
-			case 'B': m.buttons |= PSP_TRIANGLE; break;
-			case 'C': m.buttons |= PSP_CIRCLE; break;
-			case 'D': m.buttons |= PSP_CROSS; break;
-			default: return m;   // invalid
-			}
+		if (letters) {
+			if (s[i] < 'A' || s[i] > 'D')
+				return m;   // invalid
+			m.buttons |= map->letter[s[i] - 'A'];
 			i++;
 			continue;
 		}
@@ -181,6 +192,13 @@ inline Motion ParseMotion(const std::string &spec, bool blazblue = false) {
 		return m;
 	m.valid = (!m.dirs.empty() || m.buttons) && m.dirs.size() <= 12;
 	return m;
+}
+
+inline Motion ParseMotion(const std::string &spec, bool blazblue) {
+	if (!blazblue)
+		return ParseMotion(spec);
+	const ButtonMap bb = BlazBlueMap();
+	return ParseMotion(spec, &bb);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -733,11 +751,11 @@ private:
 		}
 		case ACT_RC:
 			seq_->Push(PressSteps(map_.rapidCancel, 2));
-			AddFx(FX_BUTTON, b.x, b.y, 0, 0, "RC", t);
+			AddFx(FX_BUTTON, b.x, b.y, 0, 0, map_.rapidCancelName, t);
 			break;
 		case ACT_BURST:
 			seq_->Push(PressSteps(map_.burst, 2));
-			AddFx(FX_BUTTON, b.x, b.y, 0, 0, "Burst", t);
+			AddFx(FX_BUTTON, b.x, b.y, 0, 0, map_.burstName, t);
 			break;
 		case ACT_START:
 			seq_->SetHold(id, PSP_START);

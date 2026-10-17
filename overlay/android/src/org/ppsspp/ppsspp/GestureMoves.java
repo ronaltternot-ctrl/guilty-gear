@@ -17,6 +17,9 @@ final class GestureMoves {
 	/** BlazBlue: one set for every character (its buttons are A, B, C and D). */
 	static final String[] GENERIC_BB = { "236A", "623C", "214B", "632146C" };
 
+	/** The King of Fighters: one set for every character (A, B, C, D; the last one a super). */
+	static final String[] GENERIC_KOF = { "236A", "623C", "214B", "236236A" };
+
 	/**
 	 * Defaults per character number (1 = Sol ... 25 = Justice, same order as
 	 * LauncherActivity.CHARACTERS): "input|name", or null to use the generic move.
@@ -75,6 +78,7 @@ final class GestureMoves {
 	static final String[] BUTTON_NAMES = { "P · puño", "K · patada", "S · corte", "HS · corte fuerte", "D · Dust" };
 	static final String[] BUTTONS_BB = { "A", "B", "C", "D" };
 	static final String[] BUTTON_NAMES_BB = { "A · débil", "B · medio", "C · fuerte", "D · Drive" };
+	static final String[] BUTTON_NAMES_KOF = { "A · puño débil", "B · patada débil", "C · puño fuerte", "D · patada fuerte" };
 
 	private static String entry(int id, int slot) {
 		if (id <= 0 || id >= DEFAULTS.length || slot < 0 || slot >= SLOTS || DEFAULTS[id].length <= slot) {

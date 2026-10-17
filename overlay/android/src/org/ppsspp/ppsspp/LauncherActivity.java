@@ -3,6 +3,8 @@ package org.ppsspp.ppsspp;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.app.Dialog;
+import android.content.ClipData;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.Intent;
@@ -10,8 +12,10 @@ import android.content.SharedPreferences;
 import android.content.UriPermission;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -28,10 +32,12 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowInsets;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -42,6 +48,7 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -62,6 +69,7 @@ import java.util.Locale;
 public class LauncherActivity extends Activity {
 	private static final String TAG = "AcPlusLauncher";
 	private static final int REQUEST_PICK_GAME = 4201;
+	private static final int REQUEST_ADD_GAMES = 4202;
 
 	private static final String PREFS = "launcher";
 	private static final String K_URI = "game_uri";
@@ -147,9 +155,23 @@ public class LauncherActivity extends Activity {
 		+ "• Botones de la derecha: tres especiales y un Distortion Drive (el movimiento sale solo), RC (Rapid Cancel, A+B+C) y Burst (Barrier Burst, A+B+C+D).\n"
 		+ "• Arriba a la izquierda: Start, ✕ y ○ para los menús, y una flecha que indica hacia dónde miras. Si los especiales salen al revés, tócala.";
 
-	/** Gesture specials of BlazBlue: one set for every character (stored as "bb"). */
+	private static final String GESTURE_GUIDE_KOF =
+		"• Toca: golpe. Toques seguidos hacen la cadena A → B → C → D.\n"
+		+ "• Desliza → o ←: correr o dash hacia ese lado (hacia el rival corres, hacia atrás saltas atrás). Si dejas el dedo, sigues corriendo.\n"
+		+ "• Desliza ↑, ↗ o ↖: saltar.\n"
+		+ "• Desliza ↓: barrida (2D).\n"
+		+ "• Toca con dos dedos: CD (golpe de rechazo).\n"
+		+ "• Desliza con dos dedos → o ←: agarre (C). Hacia arriba: supersalto.\n"
+		+ "• Mantén dos dedos: bloquear. Bájalos un poco para bloquear agachado.\n"
+		+ "• Mantén un dedo y arrástralo: stick para caminar, agacharte, bloquear o saltar.\n"
+		+ "• Botones de la derecha: tres especiales y un súper (el movimiento sale solo), Roll (A+B, rodar) y MAX (A+B+C: modo MAX o cargar poder, según la entrega).\n"
+		+ "• Arriba a la izquierda: Start, ✕ y ○ para los menús, y una flecha que indica hacia dónde miras. Si los especiales salen al revés, tócala.\n"
+		+ "Cada entrega de la colección tiene sus reglas: por ejemplo, en '94 no se puede rodar.";
+
+	/** Gesture specials of BlazBlue and KOF: one set for every character (stored as "bb" / "kof"). */
 	private static final int GESTURE_BB = -1;
-	/** Games added in "Mis juegos": JSON array of {uri, name, title, id, format}. */
+	private static final int GESTURE_KOF = -2;
+	/** Games in the catalog: JSON array of {uri, name, title, id, format}. */
 	private static final String K_LIBRARY = "game_library";
 
 	/** Hitbox viewer parts, in the order of the switches; ini keys read by UI/AcPlusHitboxes.h. */
@@ -294,7 +316,13 @@ public class LauncherActivity extends Activity {
 	private TextView headerTitle;
 	private TextView headerSubtitle;
 	private TextView padNote;
-	private LinearLayout libraryBox;
+	private TextView catalogButton;
+	private ImageView gameIcon;
+	private String gameIconKey;
+	private Dialog catalogDialog;
+	private LinearLayout catalogBody;
+	private int catalogFilter = -1;   // -1: every game, else GameCatalog.BADGE_*
+	private int addingGames;          // files still being read after "Añadir juegos"
 	private ScrollView mainScroll;
 	private TextView amdButtonStatus;
 	private LinearLayout fsrPanel;
@@ -374,6 +402,12 @@ public class LauncherActivity extends Activity {
 	@Override
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		super.onActivityResult(requestCode, resultCode, data);
+		if (requestCode == REQUEST_ADD_GAMES) {
+			if (resultCode == RESULT_OK && data != null) {
+				onGamesAdded(data);
+			}
+			return;
+		}
 		if (requestCode != REQUEST_PICK_GAME || resultCode != RESULT_OK || data == null || data.getData() == null) {
 			return;
 		}
@@ -385,7 +419,7 @@ public class LauncherActivity extends Activity {
 			Log.w(TAG, "Could not persist permission for " + uri, e);
 		}
 
-		// The previous game keeps its permission: it stays in "Mis juegos".
+		// The previous game keeps its permission: it stays in the catalog.
 
 		String name = queryDisplayName(uri);
 		prefs.edit()
@@ -547,8 +581,8 @@ public class LauncherActivity extends Activity {
 		// Only rewrite the button layout when the button type changes, so that buttons moved
 		// with the game's own layout editor stay where the player put them.
 		// The arcade labels depend on the game (P K S HS D or A B C D).
-		boolean blazblue = isBlazBlue();
-		String appliedKey = style + (blazblue ? "|bb" : "");
+		int kind = gameKind();
+		String appliedKey = style + (kind == GameInspector.KIND_BB ? "|bb" : kind == GameInspector.KIND_KOF ? "|kof" : "");
 		boolean writeLayout = !appliedKey.equals(prefs.getString(K_APPLIED_STYLE, ""));
 
 		StringBuilder ini = new StringBuilder();
@@ -561,13 +595,13 @@ public class LauncherActivity extends Activity {
 			.append("[Control]\n")
 			.append("ShowTouchControls = ").append(touch ? "True" : "False").append('\n');
 		if (writeLayout && arcade) {
-			appendArcadeButtonDefinitions(ini, blazblue);
+			appendArcadeButtonDefinitions(ini, kind);
 		}
 		ini.append("[TouchControls.Landscape]\n");
 		// Fast-forward isn't a PSP or arcade button: never show it.
 		ini.append("ShowTouchUnthrottle = False\n");
 		if (writeLayout) {
-			appendTouchLayout(ini, arcade, blazblue);
+			appendTouchLayout(ini, arcade, kind);
 		}
 		ini.append("[TouchControls.Portrait]\n")
 			.append("ShowTouchUnthrottle = False\n");
@@ -664,10 +698,10 @@ public class LauncherActivity extends Activity {
 			boolean arcade = STYLE_ARCADE.equals(preset);
 			StringBuilder layout = new StringBuilder("[Control]\n");
 			if (arcade) {
-				appendArcadeButtonDefinitions(layout, false);
+				appendArcadeButtonDefinitions(layout, GameInspector.KIND_GG);
 			}
 			layout.append("[TouchControls.Landscape]\n").append("ShowTouchUnthrottle = False\n");
-			appendTouchLayout(layout, arcade, false);
+			appendTouchLayout(layout, arcade, GameInspector.KIND_GG);
 			writeText(new File(getFilesDir(), "acplus_layout_" + preset + ".ini"), layout.toString());
 		}
 
@@ -706,6 +740,11 @@ public class LauncherActivity extends Activity {
 		ini.append("MovesBB = ");
 		for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
 			ini.append(slot == 0 ? "" : ",").append(gestureMove(GESTURE_BB, slot));
+		}
+		ini.append('\n');
+		ini.append("MovesKOF = ");
+		for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
+			ini.append(slot == 0 ? "" : ",").append(gestureMove(GESTURE_KOF, slot));
 		}
 		ini.append('\n');
 		for (int id = 0; id < CHARACTERS.length; id++) {
@@ -795,10 +834,30 @@ public class LauncherActivity extends Activity {
 		new ArcadeButton(IMG_LETTER_D, KEY_CROSS, BB_ARCADE_POSITIONS[3][0], BB_ARCADE_POSITIONS[3][1]),
 	};
 
+	/** Neo Geo cabinet: A, B, C and D in one arched row. */
+	static final float[][] KOF_ARCADE_POSITIONS = {
+		{ 0.705f, 0.735f },  // A
+		{ 0.787f, 0.665f },  // B
+		{ 0.870f, 0.625f },  // C
+		{ 0.952f, 0.625f },  // D
+	};
+
+	/** KOF's PSP mapping (SNK's PlayStation default): square A, cross B, triangle C, circle D. */
+	private static final ArcadeButton[] KOF_ARCADE_BUTTONS = {
+		new ArcadeButton(IMG_A, KEY_SQUARE, KOF_ARCADE_POSITIONS[0][0], KOF_ARCADE_POSITIONS[0][1]),
+		new ArcadeButton(IMG_B, KEY_CROSS, KOF_ARCADE_POSITIONS[1][0], KOF_ARCADE_POSITIONS[1][1]),
+		new ArcadeButton(IMG_C, KEY_TRIANGLE, KOF_ARCADE_POSITIONS[2][0], KOF_ARCADE_POSITIONS[2][1]),
+		new ArcadeButton(IMG_LETTER_D, KEY_CIRCLE, KOF_ARCADE_POSITIONS[3][0], KOF_ARCADE_POSITIONS[3][1]),
+	};
+
+	private static ArcadeButton[] arcadeButtons(int kind) {
+		return kind == GameInspector.KIND_BB ? BB_ARCADE_BUTTONS : kind == GameInspector.KIND_KOF ? KOF_ARCADE_BUTTONS : ARCADE_BUTTONS;
+	}
+
 	private static final float BUTTON_SCALE = 1.15f;
 
-	private static void appendArcadeButtonDefinitions(StringBuilder ini, boolean blazblue) {
-		ArcadeButton[] buttons = blazblue ? BB_ARCADE_BUTTONS : ARCADE_BUTTONS;
+	private static void appendArcadeButtonDefinitions(StringBuilder ini, int kind) {
+		ArcadeButton[] buttons = arcadeButtons(kind);
 		for (int i = 0; i < buttons.length; i++) {
 			ArcadeButton b = buttons[i];
 			ini.append("Custom").append(i).append("Mapping = ")
@@ -810,15 +869,16 @@ public class LauncherActivity extends Activity {
 		}
 	}
 
-	private static void appendTouchLayout(StringBuilder ini, boolean arcade, boolean blazblue) {
-		ArcadeButton[] buttons = blazblue ? BB_ARCADE_BUTTONS : ARCADE_BUTTONS;
+	private static void appendTouchLayout(StringBuilder ini, boolean arcade, int kind) {
+		ArcadeButton[] buttons = arcadeButtons(kind);
 		String psp = arcade ? "False" : "True";
 		ini.append("ShowTouchCircle = ").append(psp).append('\n')
 			.append("ShowTouchCross = ").append(psp).append('\n')
 			.append("ShowTouchSquare = ").append(psp).append('\n')
 			.append("ShowTouchTriangle = ").append(psp).append('\n')
-			// In arcade mode R (Dust) becomes the D button. L (Respect) stays.
-			.append("ShowTouchRTrigger = ").append(psp).append('\n');
+			// In Guilty Gear's arcade mode R (Dust) becomes the D button. L (Respect) stays.
+			// BlazBlue and KOF have D on a face button, so R stays too.
+			.append("ShowTouchRTrigger = ").append(arcade && kind == GameInspector.KIND_GG ? "False" : "True").append('\n');
 		if (arcade) {
 			// Move Start/Select toward the middle so they don't crowd the P button.
 			appendPos(ini, "StartKey", 0.56f, 0.91f, BUTTON_SCALE);
@@ -944,7 +1004,8 @@ public class LauncherActivity extends Activity {
 		new Thread(() -> {
 			GameInspector.Result result;
 			try {
-				result = GameInspector.inspect(getApplicationContext(), uri);
+				result = GameInspector.inspect(getApplicationContext(), uri, GameCatalog.iconFile(this, key));
+				GameCatalog.inspected(this, key);
 			} catch (Throwable t) {
 				Log.w(TAG, "Inspection failed", t);
 				result = new GameInspector.Result(null, null, null);
@@ -995,7 +1056,7 @@ public class LauncherActivity extends Activity {
 		if (stored == null) {
 			gameStatus.setText("Elige tu copia del juego");
 			gameStatus.setTextColor(C_TEXT);
-			gameDetail.setText("Archivo ISO o CSO de Guilty Gear XX ΛCore Plus o de BlazBlue: Calamity Trigger para PSP. Guárdalo en la memoria del teléfono o en la microSD, no en la nube.");
+			gameDetail.setText("Archivo ISO o CSO de PSP: Guilty Gear XX ΛCore Plus, BlazBlue: Calamity Trigger o The King of Fighters (Orochi Saga). Guárdalo en la memoria del teléfono o en la microSD, no en la nube. En «Catálogo» puedes añadir varios a la vez.");
 			refreshPlayLabel();
 			return;
 		}
@@ -1037,6 +1098,11 @@ public class LauncherActivity extends Activity {
 				gameStatus.setTextColor(C_OK);
 				detail.append("\nBlazBlue: botones A, B, C y D, gestos y efectos listos. El visor de hitboxes, el HUD propio y los perfiles por personaje son solo de Guilty Gear.");
 				break;
+			case KOF:
+				gameStatus.setText("✓ " + r.title);
+				gameStatus.setTextColor(C_OK);
+				detail.append("\nKOF: botones Neo Geo A, B, C y D, gestos y efectos listos. El visor de hitboxes, el HUD propio y los perfiles por personaje son solo de Guilty Gear.");
+				break;
 			case OTHER_GUILTY_GEAR:
 				gameStatus.setText("⚠ Otro Guilty Gear: " + r.title);
 				gameStatus.setTextColor(C_WARN);
@@ -1061,15 +1127,23 @@ public class LauncherActivity extends Activity {
 	}
 
 	// -------------------------------------------------------------------------------------------
-	// Several games: header and "Mis juegos"
+	// Several games: header and catalog
 
-	private boolean isBlazBlue() {
-		return GameInspector.isBlazBlue(prefs.getString(K_ID, null), prefs.getString(K_TITLE, null));
+	private int gameKind() {
+		return GameInspector.kind(prefs.getString(K_ID, null), prefs.getString(K_TITLE, null));
 	}
 
-	/** Short name for messages ("Guilty Gear XX ΛC+", "BlazBlue"). */
+	private boolean isBlazBlue() {
+		return gameKind() == GameInspector.KIND_BB;
+	}
+
+	private boolean isKof() {
+		return gameKind() == GameInspector.KIND_KOF;
+	}
+
+	/** Short name for messages ("Guilty Gear XX ΛC+", "BlazBlue", "KOF"). */
 	private String gameShortName() {
-		return isBlazBlue() ? "BlazBlue" : "Guilty Gear XX ΛC+";
+		return isBlazBlue() ? "BlazBlue" : isKof() ? "The King of Fighters" : "Guilty Gear XX ΛC+";
 	}
 
 	private void refreshHeader() {
@@ -1081,6 +1155,12 @@ public class LauncherActivity extends Activity {
 			boolean cs = t != null && t.toUpperCase(Locale.ROOT).contains("CONTINUUM");
 			headerKicker.setText("BLAZBLUE");
 			headerTitle.setText(cs ? "CONTINUUM SHIFT II" : "CALAMITY TRIGGER");
+			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
+		} else if (isKof()) {
+			String t = prefs.getString(K_TITLE, "");
+			boolean portable = t != null && t.toUpperCase(Locale.ROOT).contains("PORTABLE");
+			headerKicker.setText("THE KING OF FIGHTERS");
+			headerTitle.setText(portable ? "PORTABLE '94~'98" : "OROCHI SAGA");
 			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
 		} else {
 			headerKicker.setText("GUILTY GEAR XX");
@@ -1097,90 +1177,581 @@ public class LauncherActivity extends Activity {
 		}
 	}
 
-	/** Keeps the current game in the list (once it has been identified). */
+	/** Keeps the current game in the catalog (once it has been identified), first in the list. */
 	private void addCurrentToLibrary() {
 		String uri = prefs.getString(K_URI, null);
 		if (uri == null || !prefs.getBoolean(K_INSPECTED, false)) {
 			return;
 		}
-		org.json.JSONArray lib = loadLibrary();
-		org.json.JSONArray out = new org.json.JSONArray();
 		try {
-			org.json.JSONObject entry = new org.json.JSONObject()
+			putInLibrary(new org.json.JSONObject()
 				.put("uri", uri)
 				.put("name", prefs.getString(K_NAME, ""))
 				.put("title", prefs.getString(K_TITLE, ""))
 				.put("id", prefs.getString(K_ID, ""))
-				.put("format", prefs.getString(K_FORMAT, ""));
-			out.put(entry);
-			for (int i = 0; i < lib.length() && out.length() < 12; i++) {
-				org.json.JSONObject e = lib.optJSONObject(i);
-				if (e != null && !uri.equals(e.optString("uri"))) {
-					out.put(e);
-				}
-			}
+				.put("format", prefs.getString(K_FORMAT, "")), true);
 		} catch (org.json.JSONException e) {
-			return;
+			Log.w(TAG, "Library entry", e);
+		}
+	}
+
+	/**
+	 * Adds or updates a game. New games go first; with toFront an existing one moves there too.
+	 * Past GameCatalog.MAX_GAMES the oldest ones leave the catalog (and their file permission).
+	 */
+	private void putInLibrary(org.json.JSONObject entry, boolean toFront) {
+		String uri = entry.optString("uri");
+		org.json.JSONArray lib = loadLibrary();
+		List<org.json.JSONObject> list = new ArrayList<>();
+		boolean found = false;
+		for (int i = 0; i < lib.length(); i++) {
+			org.json.JSONObject e = lib.optJSONObject(i);
+			if (e == null) {
+				continue;
+			}
+			if (uri.equals(e.optString("uri"))) {
+				found = true;
+				if (!toFront) {
+					list.add(entry);
+				}
+				continue;
+			}
+			list.add(e);
+		}
+		if (toFront || !found) {
+			list.add(0, entry);
+		}
+		String current = prefs.getString(K_URI, null);
+		org.json.JSONArray out = new org.json.JSONArray();
+		for (int i = 0; i < list.size(); i++) {
+			org.json.JSONObject e = list.get(i);
+			if (out.length() < GameCatalog.MAX_GAMES || e.optString("uri").equals(current)) {
+				out.put(e);
+			} else {
+				releaseGame(e.optString("uri"));
+			}
 		}
 		if (!out.toString().equals(lib.toString())) {
 			prefs.edit().putString(K_LIBRARY, out.toString()).apply();
 		}
 	}
 
-	private void refreshLibrary() {
-		if (libraryBox == null) {
+	/** Gives back the permission of a file that is no longer in the catalog. */
+	private void releaseGame(String uri) {
+		if (uri == null || uri.isEmpty() || uri.equals(prefs.getString(K_URI, null))) {
 			return;
 		}
-		libraryBox.removeAllViews();
-		String current = prefs.getString(K_URI, null);
-		org.json.JSONArray lib = loadLibrary();
-		int shown = 0;
-		for (int i = 0; i < lib.length(); i++) {
-			final org.json.JSONObject e = lib.optJSONObject(i);
-			if (e == null || e.optString("uri").equals(current)) {
-				continue;
-			}
-			if (shown == 0) {
-				TextView label = text("Mis juegos · toca para cambiar", 13, C_MUTED, true);
-				label.setPadding(0, dp(16), 0, dp(2));
-				libraryBox.addView(label);
-			}
-			shown++;
-			LinearLayout row = new LinearLayout(this);
-			row.setOrientation(LinearLayout.VERTICAL);
-			row.setPadding(dp(14), dp(10), dp(14), dp(10));
-			row.setBackground(ripple(Color.TRANSPARENT, C_CHIP_STROKE, 12));
-			makeClickable(row);
-			String title = e.optString("title");
-			row.addView(text(title.isEmpty() ? e.optString("name") : title, 15, C_TEXT, true));
-			GameInspector.Result r = new GameInspector.Result(e.optString("format"), e.optString("id"), title);
-			String id = r.prettyDiscId();
-			row.addView(text((id == null || id.isEmpty() ? "" : id + " · ") + e.optString("name"), 12, C_MUTED, false));
-			row.setOnClickListener(v -> switchGame(e));
-			row.setOnLongClickListener(v -> {
-				confirmRemoveFromLibrary(e);
-				return true;
-			});
-			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-			lp.topMargin = dp(8);
-			libraryBox.addView(row, lp);
-		}
-		if (shown > 0) {
-			TextView hint = text("Mantén pulsado un juego para quitarlo de la lista (no se borra el archivo).", 11, 0xFF6C6C78, false);
-			hint.setPadding(0, dp(6), 0, 0);
-			libraryBox.addView(hint);
+		GameCatalog.forget(this, uri);
+		try {
+			getContentResolver().releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+		} catch (SecurityException ignored) {
+			// Not persisted anymore.
 		}
 	}
 
-	private void switchGame(org.json.JSONObject e) {
+	private void refreshLibrary() {
+		int n = loadLibrary().length();
+		if (catalogButton != null) {
+			catalogButton.setText(n == 0 ? "CATÁLOGO" : "CATÁLOGO  ·  " + n + (n == 1 ? " juego" : " juegos"));
+		}
+		refreshGameIcon();
+		if (catalogDialog != null && catalogDialog.isShowing()) {
+			fillCatalog();
+		}
+	}
+
+	/** The current game's icon next to its name in «JUEGO». */
+	private void refreshGameIcon() {
+		if (gameIcon == null) {
+			return;
+		}
+		final String uri = prefs.getString(K_URI, null);
+		if (uri == null || !prefs.getBoolean(K_INSPECTED, false)) {
+			gameIcon.setVisibility(View.GONE);
+			gameIconKey = null;
+			return;
+		}
+		gameIcon.setVisibility(View.VISIBLE);
+		String id = prefs.getString(K_ID, null);
+		String title = prefs.getString(K_TITLE, null);
+		final String key = uri + "|" + id + "|" + title;
+		Bitmap hit = GameCatalog.cached(uri);
+		if (key.equals(gameIconKey) && hit == null) {
+			return;   // the cover is shown and the icon is on its way (or there is none)
+		}
+		gameIconKey = key;
+		gameIcon.setImageBitmap(hit != null ? hit : GameCatalog.cover(GameCatalog.badge(id, title), title, dp(112)));
+		if (hit == null) {
+			GameCatalog.load(this, uri, handler, (u, bmp) -> {
+				if (bmp != null && key.equals(gameIconKey)) {
+					gameIcon.setImageBitmap(bmp);
+				}
+			});
+		}
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Catalog: every game added, with its icon
+
+	private static final String[][] SUPPORTED_GAMES = {
+		{ "Guilty Gear XX ΛCore Plus", "ULUS-10409 (América) · también otras versiones",
+			"Botones arcade P K S HS D, gestos con especiales por personaje, perfiles por personaje, visor de hitboxes, HUD propio, efectos y FSR. Lo que lee la memoria del juego (perfiles, visor, HUD y especiales por personaje) necesita la versión ULUS-10409." },
+		{ "BlazBlue: Calamity Trigger Portable", "ULUS-10519 · ULES-01497 · ULJM-05613 · también Continuum Shift II",
+			"Botones arcade A B C D, gestos (cadena A → B → C, Drive con ✕), cuatro especiales iguales para todos los personajes, efectos y FSR." },
+		{ "The King of Fighters Collection: The Orochi Saga", "ULUS-10360 · ULES-01191",
+			"Botones Neo Geo A B C D, gestos (cadena A → B → C → D, CD, Roll y MAX), cuatro especiales iguales para todos los personajes, efectos y FSR." },
+	};
+	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF };
+
+	/** ImageView with the shape of a PSP game icon (144 x 80). */
+	private static final class IconView extends ImageView {
+		IconView(android.content.Context c) {
+			super(c);
+			setScaleType(ScaleType.CENTER_CROP);
+		}
+
+		@Override
+		protected void onMeasure(int widthSpec, int heightSpec) {
+			int w = MeasureSpec.getSize(widthSpec);
+			if (MeasureSpec.getMode(widthSpec) == MeasureSpec.UNSPECIFIED) {
+				super.onMeasure(widthSpec, heightSpec);
+				return;
+			}
+			setMeasuredDimension(w, Math.round(w * 80f / 144f));
+		}
+	}
+
+	private void showCatalog() {
+		if (catalogDialog != null && catalogDialog.isShowing()) {
+			return;
+		}
+		Dialog d = new Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar);
+		ScrollView scroll = new ScrollView(this);
+		scroll.setBackgroundColor(C_BG);
+		scroll.setFillViewport(true);
+		if (Build.VERSION.SDK_INT >= 35) {
+			scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+				applyInsets(v, insets);
+				return insets;
+			});
+		}
+		FrameLayout center = new FrameLayout(this);
+		scroll.addView(center, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		LinearLayout col = new LinearLayout(this);
+		col.setOrientation(LinearLayout.VERTICAL);
+		col.setPadding(dp(20), dp(20), dp(20), dp(28));
+		int screenDp = (int) (getResources().getDisplayMetrics().widthPixels / getResources().getDisplayMetrics().density);
+		int width = screenDp > 940 ? dp(900) : ViewGroup.LayoutParams.MATCH_PARENT;
+		center.addView(col, new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+		d.setContentView(scroll);
+		Window w = d.getWindow();
+		if (w != null) {
+			w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+			w.setBackgroundDrawable(new ColorDrawable(C_BG));
+		}
+		d.setOnDismissListener(x -> {
+			catalogDialog = null;
+			catalogBody = null;
+		});
+		catalogDialog = d;
+		catalogBody = col;
+		fillCatalog();
+		d.show();
+	}
+
+	private void fillCatalog() {
+		final LinearLayout col = catalogBody;
+		if (col == null) {
+			return;
+		}
+		col.removeAllViews();
+		org.json.JSONArray lib = loadLibrary();
+		String current = prefs.getString(K_URI, null);
+		java.util.Set<String> readable = new java.util.HashSet<>();
+		for (UriPermission perm : getContentResolver().getPersistedUriPermissions()) {
+			if (perm.isReadPermission()) {
+				readable.add(perm.getUri().toString());
+			}
+		}
+
+		// Header
+		LinearLayout top = new LinearLayout(this);
+		top.setOrientation(LinearLayout.HORIZONTAL);
+		top.setGravity(Gravity.CENTER_VERTICAL);
+		LinearLayout titles = new LinearLayout(this);
+		titles.setOrientation(LinearLayout.VERTICAL);
+		TextView kicker = text("CATÁLOGO", 13, C_ACCENT, true);
+		kicker.setLetterSpacing(0.3f);
+		titles.addView(kicker);
+		TextView title = text("Tus juegos", 34, C_TEXT, true);
+		title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+		titles.addView(title);
+		top.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		TextView close = text("✕", 20, C_TEXT, true);
+		close.setGravity(Gravity.CENTER);
+		close.setBackground(ripple(Color.TRANSPARENT, C_CHIP_STROKE, 24));
+		close.setContentDescription("Cerrar el catálogo");
+		makeClickable(close);
+		close.setOnClickListener(v -> {
+			if (catalogDialog != null) {
+				catalogDialog.dismiss();
+			}
+		});
+		top.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+		col.addView(top);
+
+		int total = lib.length();
+		String sub = total == 0 ? "Aún no has añadido juegos."
+			: total + (total == 1 ? " juego" : " juegos") + " · toca uno para elegirlo, mantén pulsado para quitarlo del catálogo (el archivo no se borra).";
+		if (addingGames > 0) {
+			sub = "Leyendo " + addingGames + (addingGames == 1 ? " archivo…" : " archivos…") + "\n" + sub;
+		}
+		TextView subtitle = text(sub, 13, C_MUTED, false);
+		subtitle.setPadding(0, dp(4), 0, 0);
+		col.addView(subtitle);
+
+		TextView add = filledButton("+   Añadir juegos (ISO / CSO)", 15);
+		add.setOnClickListener(v -> pickGames());
+		LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		addLp.topMargin = dp(16);
+		col.addView(add, addLp);
+		TextView addHint = text("Puedes elegir varios archivos a la vez. Se quedan en su sitio: la app solo guarda el permiso para abrirlos.", 12, 0xFF6C6C78, false);
+		addHint.setPadding(0, dp(6), 0, 0);
+		col.addView(addHint);
+
+		// Filter by game
+		int[] counts = new int[GameCatalog.BADGE_NAMES.length];
+		for (int i = 0; i < total; i++) {
+			org.json.JSONObject e = lib.optJSONObject(i);
+			if (e != null) {
+				counts[GameCatalog.badge(e.optString("id"), e.optString("title"))]++;
+			}
+		}
+		if (catalogFilter >= 0 && counts[catalogFilter] == 0) {
+			catalogFilter = -1;
+		}
+		int kinds = 0;
+		for (int c : counts) {
+			kinds += c > 0 ? 1 : 0;
+		}
+		if (kinds > 1) {
+			android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(this);
+			hs.setHorizontalScrollBarEnabled(false);
+			LinearLayout chips = new LinearLayout(this);
+			chips.setOrientation(LinearLayout.HORIZONTAL);
+			hs.addView(chips);
+			addFilterChip(chips, -1, "Todos · " + total);
+			for (int b = 0; b < counts.length; b++) {
+				if (counts[b] > 0) {
+					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF" : "Otros") + " · " + counts[b]);
+				}
+			}
+			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+			hlp.topMargin = dp(16);
+			col.addView(hs, hlp);
+		}
+
+		// Grid of games
+		int screenDp = (int) (getResources().getDisplayMetrics().widthPixels / getResources().getDisplayMetrics().density);
+		int columns = screenDp >= 900 ? 4 : screenDp >= 600 ? 3 : 2;
+		LinearLayout row = null;
+		int n = 0;
+		for (int i = 0; i < total; i++) {
+			org.json.JSONObject e = lib.optJSONObject(i);
+			if (e == null || (catalogFilter >= 0 && GameCatalog.badge(e.optString("id"), e.optString("title")) != catalogFilter)) {
+				continue;
+			}
+			if (n % columns == 0) {
+				row = new LinearLayout(this);
+				row.setOrientation(LinearLayout.HORIZONTAL);
+				LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+				rlp.topMargin = dp(12);
+				col.addView(row, rlp);
+			}
+			String uri = e.optString("uri");
+			boolean access = !"content".equals(Uri.parse(uri).getScheme()) || readable.contains(uri);
+			int k = n % columns;
+			row.addView(catalogTile(e, uri.equals(current), access), weighted(k == 0 ? 0 : dp(6), k == columns - 1 ? 0 : dp(6)));
+			n++;
+		}
+		while (row != null && n % columns != 0) {
+			int k = n % columns;
+			row.addView(new View(this), weighted(k == 0 ? 0 : dp(6), k == columns - 1 ? 0 : dp(6)));
+			n++;
+		}
+		if (total == 0) {
+			LinearLayout empty = card(C_STROKE);
+			empty.addView(text("Tu catálogo está vacío", 16, C_TEXT, true));
+			TextView et = text("Toca «Añadir juegos» y elige tus ISO o CSO de PSP. Aparecerán aquí con su icono, y podrás cambiar de juego con un toque.", 13, C_MUTED, false);
+			et.setPadding(0, dp(4), 0, 0);
+			empty.addView(et);
+			col.addView(empty, cardParams());
+		}
+
+		// Games with their own controls
+		TextView label = text("JUEGOS COMPATIBLES", 12, C_MUTED, true);
+		label.setLetterSpacing(0.18f);
+		label.setPadding(0, dp(28), 0, 0);
+		col.addView(label);
+		for (int g = 0; g < SUPPORTED_GAMES.length; g++) {
+			col.addView(supportedCard(g, counts[SUPPORTED_BADGES[g]] > 0), cardParams());
+		}
+		TextView others = text("Cualquier otro juego de PSP también arranca, con los botones de PSP, los efectos visuales y FSR.", 12, 0xFF6C6C78, false);
+		others.setPadding(0, dp(12), 0, 0);
+		col.addView(others);
+	}
+
+	private void addFilterChip(LinearLayout chips, final int badge, String label) {
+		TextView c = chip(label);
+		c.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+		c.setPadding(dp(14), dp(8), dp(14), dp(8));
+		styleChip(c, catalogFilter == badge);
+		c.setOnClickListener(v -> {
+			catalogFilter = badge;
+			fillCatalog();
+		});
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.rightMargin = dp(8);
+		chips.addView(c, lp);
+	}
+
+	private View catalogTile(final org.json.JSONObject e, final boolean selected, boolean access) {
+		final String uri = e.optString("uri");
+		final String title = e.optString("title");
+		String id = e.optString("id");
+		int badge = GameCatalog.badge(id, title);
+
+		LinearLayout tile = new LinearLayout(this);
+		tile.setOrientation(LinearLayout.VERTICAL);
+		tile.setPadding(dp(8), dp(8), dp(8), dp(10));
+		tile.setBackground(ripple(C_CARD, selected ? C_ACCENT : C_STROKE, 14));
+		makeClickable(tile);
+
+		FrameLayout pic = new FrameLayout(this);
+		final IconView img = new IconView(this);
+		GradientDrawable round = new GradientDrawable();
+		round.setColor(0xFF101015);
+		round.setCornerRadius(dp(10));
+		img.setBackground(round);
+		img.setClipToOutline(true);
+		img.setTag(uri);
+		Bitmap hit = GameCatalog.cached(uri);
+		img.setImageBitmap(hit != null ? hit : GameCatalog.cover(badge, title.isEmpty() ? e.optString("name") : title, dp(120)));
+		if (hit == null) {
+			GameCatalog.load(this, uri, handler, (u, bmp) -> {
+				if (bmp != null && u.equals(img.getTag())) {
+					img.setImageBitmap(bmp);
+				}
+			});
+		}
+		pic.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		if (selected) {
+			TextView inUse = text("▶ ELEGIDO", 10, Color.WHITE, true);
+			inUse.setLetterSpacing(0.1f);
+			inUse.setPadding(dp(7), dp(3), dp(7), dp(3));
+			GradientDrawable pill = new GradientDrawable();
+			pill.setColor(C_ACCENT);
+			pill.setCornerRadius(dp(8));
+			inUse.setBackground(pill);
+			FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+			plp.setMargins(dp(6), dp(6), 0, 0);
+			pic.addView(inUse, plp);
+		}
+		tile.addView(pic);
+
+		TextView name = text(title.isEmpty() ? e.optString("name") : title, 14, C_TEXT, true);
+		name.setMaxLines(2);
+		name.setEllipsize(TextUtils.TruncateAt.END);
+		name.setPadding(0, dp(8), 0, 0);
+		tile.addView(name);
+
+		TextView kind = text("●  " + GameCatalog.BADGE_NAMES[badge], 10, GameCatalog.BADGE_COLORS[badge] == 0xFF6C6C78 ? C_MUTED : GameCatalog.BADGE_COLORS[badge], true);
+		kind.setLetterSpacing(0.12f);
+		kind.setPadding(0, dp(4), 0, 0);
+		tile.addView(kind);
+
+		GameInspector.Result r = new GameInspector.Result(e.optString("format"), id, title);
+		String pretty = r.prettyDiscId();
+		String format = e.optString("format");
+		String line = (pretty == null || pretty.isEmpty() ? "" : pretty) + (format.isEmpty() ? "" : (pretty == null || pretty.isEmpty() ? "" : " · ") + format);
+		TextView detail = text(access ? (line.isEmpty() ? e.optString("name") : line) : "⚠ Sin acceso: vuelve a añadirlo", 11, access ? C_MUTED : C_WARN, false);
+		detail.setMaxLines(1);
+		detail.setEllipsize(TextUtils.TruncateAt.END);
+		detail.setPadding(0, dp(2), 0, 0);
+		tile.addView(detail);
+
+		tile.setOnClickListener(v -> {
+			if (selected || switchGame(e)) {
+				if (catalogDialog != null) {
+					catalogDialog.dismiss();
+				}
+			}
+		});
+		tile.setOnLongClickListener(v -> {
+			if (selected) {
+				showMessage("Es el juego elegido", "Elige otro juego antes de quitar este del catálogo.");
+			} else {
+				confirmRemoveFromLibrary(e);
+			}
+			return true;
+		});
+		tile.setContentDescription((title.isEmpty() ? e.optString("name") : title) + (selected ? ", elegido" : ""));
+		return tile;
+	}
+
+	private View supportedCard(int g, boolean owned) {
+		int badge = SUPPORTED_BADGES[g];
+		LinearLayout c = card(C_STROKE);
+		c.setOrientation(LinearLayout.HORIZONTAL);
+		IconView img = new IconView(this);
+		GradientDrawable round = new GradientDrawable();
+		round.setCornerRadius(dp(8));
+		img.setBackground(round);
+		img.setClipToOutline(true);
+		img.setImageBitmap(GameCatalog.cover(badge, SUPPORTED_GAMES[g][0], dp(96)));
+		LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(88), ViewGroup.LayoutParams.WRAP_CONTENT);
+		ilp.rightMargin = dp(14);
+		c.addView(img, ilp);
+		LinearLayout texts = new LinearLayout(this);
+		texts.setOrientation(LinearLayout.VERTICAL);
+		texts.addView(text(SUPPORTED_GAMES[g][0], 15, C_TEXT, true));
+		TextView ids = text(SUPPORTED_GAMES[g][1], 11, GameCatalog.BADGE_COLORS[badge], true);
+		ids.setPadding(0, dp(2), 0, 0);
+		texts.addView(ids);
+		TextView what = text(SUPPORTED_GAMES[g][2], 12, C_MUTED, false);
+		what.setPadding(0, dp(6), 0, 0);
+		texts.addView(what);
+		if (owned) {
+			TextView yes = text("✓ En tu catálogo", 12, C_OK, true);
+			yes.setPadding(0, dp(6), 0, 0);
+			texts.addView(yes);
+		}
+		c.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		return c;
+	}
+
+	private void pickGames() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+		intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+		try {
+			startActivityForResult(intent, REQUEST_ADD_GAMES);
+		} catch (ActivityNotFoundException e) {
+			showMessage("Sin selector de archivos",
+				"Tu teléfono no tiene un selector de archivos disponible. Instala o activa la app «Archivos» e inténtalo de nuevo.");
+		}
+	}
+
+	private static boolean looksLikeGameFile(String name) {
+		String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+		for (String ext : new String[] { ".iso", ".cso", ".chd", ".zso", ".pbp", ".elf", ".prx" }) {
+			if (n.endsWith(ext)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** «Añadir juegos»: reads every file chosen (name, disc id, title, icon) and adds it. */
+	private void onGamesAdded(Intent data) {
+		final List<Uri> uris = new ArrayList<>();
+		ClipData clip = data.getClipData();
+		if (clip != null) {
+			for (int i = 0; i < clip.getItemCount(); i++) {
+				Uri u = clip.getItemAt(i).getUri();
+				if (u != null) {
+					uris.add(u);
+				}
+			}
+		} else if (data.getData() != null) {
+			uris.add(data.getData());
+		}
+		if (uris.isEmpty()) {
+			return;
+		}
+		for (Uri u : uris) {
+			try {
+				getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+			} catch (SecurityException e) {
+				Log.w(TAG, "Could not persist permission for " + u, e);
+			}
+		}
+		addingGames += uris.size();
+		fillCatalog();
+		final android.content.Context app = getApplicationContext();
+		new Thread(() -> {
+			final List<org.json.JSONObject> added = new ArrayList<>();
+			final List<String> skippedNames = new ArrayList<>();
+			final List<String> skippedUris = new ArrayList<>();
+			for (Uri u : uris) {
+				String key = u.toString();
+				String name = queryDisplayName(u);
+				try {
+					GameInspector.Result r = GameInspector.inspect(app, u, GameCatalog.iconFile(app, key));
+					GameCatalog.inspected(app, key);
+					if (r.discId == null && r.title == null && !looksLikeGameFile(name)) {
+						skippedNames.add(name);
+						skippedUris.add(key);
+						continue;
+					}
+					added.add(new org.json.JSONObject()
+						.put("uri", key)
+						.put("name", name)
+						.put("title", r.title == null ? "" : r.title)
+						.put("id", r.discId == null ? "" : r.discId)
+						.put("format", r.format == null ? "" : r.format));
+				} catch (Throwable t) {
+					Log.w(TAG, "Could not add " + key, t);
+					skippedNames.add(name);
+					skippedUris.add(key);
+				}
+			}
+			handler.post(() -> {
+				addingGames = Math.max(0, addingGames - uris.size());
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				// Newest last in the loop, so the first file chosen ends up first.
+				for (int i = added.size() - 1; i >= 0; i--) {
+					putInLibrary(added.get(i), false);
+				}
+				for (String u : skippedUris) {
+					boolean inLibrary = false;
+					org.json.JSONArray lib = loadLibrary();
+					for (int i = 0; i < lib.length(); i++) {
+						org.json.JSONObject x = lib.optJSONObject(i);
+						inLibrary |= x != null && u.equals(x.optString("uri"));
+					}
+					if (!inLibrary) {
+						releaseGame(u);
+					}
+				}
+				if (prefs.getString(K_URI, null) == null && !added.isEmpty()) {
+					switchGame(added.get(0));
+				}
+				refreshLibrary();
+				if (!added.isEmpty()) {
+					Toast.makeText(this, added.size() == 1 ? "Se añadió 1 juego al catálogo" : "Se añadieron " + added.size() + " juegos al catálogo", Toast.LENGTH_SHORT).show();
+				}
+				if (!skippedNames.isEmpty()) {
+					showMessage(skippedNames.size() == 1 ? "Un archivo no se añadió" : skippedNames.size() + " archivos no se añadieron",
+						TextUtils.join("\n", skippedNames) + "\n\nNo parecen juegos de PSP (ISO o CSO) o no se pudieron abrir.");
+				}
+			});
+		}, "GameCatalogAdd").start();
+	}
+
+	private boolean switchGame(org.json.JSONObject e) {
 		if (findEmuPid() > 0) {
 			showMessage("Hay una partida abierta", "Cierra la partida en curso (botón «Cerrar partida» de arriba) antes de cambiar de juego.");
-			return;
+			return false;
 		}
 		Uri uri = Uri.parse(e.optString("uri"));
 		if (!hasReadAccess(uri)) {
-			showMessage("No tengo acceso a ese archivo", "Puede que se haya movido o borrado. Vuelve a añadirlo con «Añadir o cambiar de juego».");
-			return;
+			showMessage("No tengo acceso a ese archivo", "Puede que se haya movido o borrado. Vuelve a añadirlo en el catálogo con «Añadir juegos».");
+			return false;
 		}
 		String title = e.optString("title");
 		String id = e.optString("id");
@@ -1197,12 +1768,13 @@ public class LauncherActivity extends Activity {
 		if (mainScroll != null) {
 			mainScroll.smoothScrollTo(0, 0);
 		}
+		return true;
 	}
 
 	private void confirmRemoveFromLibrary(org.json.JSONObject e) {
 		String title = e.optString("title");
 		new AlertDialog.Builder(this)
-			.setTitle("¿Quitar de «Mis juegos»?")
+			.setTitle("¿Quitar del catálogo?")
 			.setMessage((title.isEmpty() ? e.optString("name") : title) + "\n\nEl archivo no se borra; puedes volver a añadirlo cuando quieras.")
 			.setPositiveButton("Quitar", (d, w) -> {
 				org.json.JSONArray lib = loadLibrary();
@@ -1214,11 +1786,7 @@ public class LauncherActivity extends Activity {
 					}
 				}
 				prefs.edit().putString(K_LIBRARY, out.toString()).apply();
-				try {
-					getContentResolver().releasePersistableUriPermission(Uri.parse(e.optString("uri")), Intent.FLAG_GRANT_READ_URI_PERMISSION);
-				} catch (SecurityException ignored) {
-					// Not persisted anymore.
-				}
+				releaseGame(e.optString("uri"));
 				refreshLibrary();
 			})
 			.setNegativeButton("Cancelar", null)
@@ -1333,8 +1901,8 @@ public class LauncherActivity extends Activity {
 		}
 		StringBuilder s = new StringBuilder();
 		if (!isProfileGame()) {
-			s.append(isBlazBlue()
-				? "⚠ Con BlazBlue no se usa: los perfiles por personaje son solo de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
+			s.append(gameKind() != GameInspector.KIND_GG
+				? "⚠ Con " + gameShortName() + " no se usa: los perfiles por personaje son solo de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
 				: "⚠ Tu copia es " + prefs.getString(K_ID, "") + ". El cambio automático solo funciona con la versión americana (ULUS-10409); con otras versiones se usa siempre el tipo de botones general.\n\n");
 		}
 		s.append(custom == 0 ? "Todos usan el tipo de botones general." : custom + (custom == 1 ? " personaje tiene" : " personajes tienen") + " un tipo de botones propio.");
@@ -1362,8 +1930,8 @@ public class LauncherActivity extends Activity {
 		hudPreview.setContentDescription("Vista previa del HUD " + HUD_NAMES[design - 1]);
 		String desc = HUD_DESCRIPTIONS[design - 1];
 		if (!isProfileGame()) {
-			desc = (isBlazBlue()
-				? "⚠ Con BlazBlue no se usa: el HUD propio lee la memoria de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
+			desc = (gameKind() != GameInspector.KIND_GG
+				? "⚠ Con " + gameShortName() + " no se usa: el HUD propio lee la memoria de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
 				: "⚠ Tu copia es " + prefs.getString(K_ID, "") + ": el HUD propio solo funciona con la versión americana (ULUS-10409).\n\n") + desc;
 		}
 		hudDesc.setText(desc);
@@ -1693,12 +2261,12 @@ public class LauncherActivity extends Activity {
 
 	/** A special move button's input: chosen in the launcher, or the character's default. */
 	private static String gestureKey(int id, int slot) {
-		return K_GES_MOVE + (id == GESTURE_BB ? "bb" : String.valueOf(id)) + "_" + slot;
+		return K_GES_MOVE + (id == GESTURE_BB ? "bb" : id == GESTURE_KOF ? "kof" : String.valueOf(id)) + "_" + slot;
 	}
 
 	private String gestureMove(int id, int slot) {
 		String custom = prefs.getString(gestureKey(id, slot), null);
-		if (GestureMoves.valid(custom, id == GESTURE_BB)) {
+		if (GestureMoves.valid(custom, id < 0)) {
 			return custom;
 		}
 		return gestureDefault(id, slot);
@@ -1708,11 +2276,14 @@ public class LauncherActivity extends Activity {
 		if (id == GESTURE_BB) {
 			return GestureMoves.GENERIC_BB[slot];
 		}
+		if (id == GESTURE_KOF) {
+			return GestureMoves.GENERIC_KOF[slot];
+		}
 		return id == 0 ? GestureMoves.GENERIC[slot] : GestureMoves.defaultMove(id, slot);
 	}
 
 	private String gestureCharName(int id) {
-		return id == GESTURE_BB ? "BlazBlue" : id == 0 ? "General" : CHARACTERS[id];
+		return id == GESTURE_BB ? "BlazBlue" : id == GESTURE_KOF ? "KOF" : id == 0 ? "General" : CHARACTERS[id];
 	}
 
 	private void refreshGestures() {
@@ -1731,12 +2302,14 @@ public class LauncherActivity extends Activity {
 		styleChip(gestureSide1p, side == 0);
 		styleChip(gestureSide2p, side == 1);
 		final boolean bb = isBlazBlue();
-		final int shown = bb ? GESTURE_BB : gestureChar;
-		gestureGuide.setText(bb ? GESTURE_GUIDE_BB : GESTURE_GUIDE);
-		gestureCharButton.setText(bb ? "BlazBlue · los mismos para todos los personajes" : "Personaje: " + gestureCharName(gestureChar) + "  ▾");
-		gestureCharButton.setEnabled(!bb);
-		gestureMovesNote.setText(bb
-			? "En BlazBlue los cuatro botones son los mismos con cualquier personaje (la app no lee qué personaje usas). Toca uno para cambiar su movimiento: 236 = ↓↘→, y los botones son A, B, C y D."
+		final boolean kof = isKof();
+		final boolean letters = bb || kof;
+		final int shown = bb ? GESTURE_BB : kof ? GESTURE_KOF : gestureChar;
+		gestureGuide.setText(bb ? GESTURE_GUIDE_BB : kof ? GESTURE_GUIDE_KOF : GESTURE_GUIDE);
+		gestureCharButton.setText(letters ? gameShortName() + " · los mismos para todos los personajes" : "Personaje: " + gestureCharName(gestureChar) + "  ▾");
+		gestureCharButton.setEnabled(!letters);
+		gestureMovesNote.setText(letters
+			? "En " + gameShortName() + " los cuatro botones son los mismos con cualquier personaje (la app no lee qué personaje usas). Toca uno para cambiar su movimiento: 236 = ↓↘→, y los botones son A, B, C y D."
 			: "Los botones cambian solos según tu personaje (versión ULUS-10409). Toca uno para cambiar su movimiento: la notación es la de los números del teclado, mirando a la derecha (236 = ↓↘→).");
 
 		gestureMoveRows.removeAllViews();
@@ -1750,9 +2323,9 @@ public class LauncherActivity extends Activity {
 			row.setPadding(dp(14), dp(10), dp(14), dp(10));
 			row.setBackground(ripple(Color.TRANSPARENT, C_CHIP_STROKE, 12));
 			makeClickable(row);
-			String slotName = bb && slot == 3 ? "Distortion Drive" : GestureMoves.SLOT_NAMES[slot];
+			String slotName = gestureSlotName(shown, slot);
 			row.addView(text(slotName + "  ·  " + move, 15, C_TEXT, true));
-			String detail = GestureMoves.arrows(move, bb) + (name != null ? "  ·  " + name : custom ? "  ·  elegido por ti" : "");
+			String detail = GestureMoves.arrows(move, letters) + (name != null ? "  ·  " + name : custom ? "  ·  elegido por ti" : "");
 			row.addView(text(detail, 13, C_MUTED, false));
 			row.setOnClickListener(v -> showMotionPicker(shown, s));
 			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1786,7 +2359,7 @@ public class LauncherActivity extends Activity {
 		String def = gestureDefault(id, slot);
 		rows[motions.length] = "Volver al predeterminado: " + def;
 		new AlertDialog.Builder(this)
-			.setTitle(gestureCharName(id) + " · " + GestureMoves.SLOT_NAMES[slot] + ": movimiento")
+			.setTitle(gestureCharName(id) + " · " + gestureSlotName(id, slot) + ": movimiento")
 			.setItems(rows, (d, which) -> {
 				if (which == motions.length) {
 					prefs.edit().remove(gestureKey(id, slot)).apply();
@@ -1802,13 +2375,23 @@ public class LauncherActivity extends Activity {
 	private void showButtonPicker(int id, int slot, String motion) {
 		new AlertDialog.Builder(this)
 			.setTitle((motion.isEmpty() ? "" : GestureMoves.arrows(motion) + " + ") + "¿qué botón?")
-			.setItems(id == GESTURE_BB ? GestureMoves.BUTTON_NAMES_BB : GestureMoves.BUTTON_NAMES, (d, which) -> {
-				String button = (id == GESTURE_BB ? GestureMoves.BUTTONS_BB : GestureMoves.BUTTONS)[which];
+			.setItems(id == GESTURE_BB ? GestureMoves.BUTTON_NAMES_BB : id == GESTURE_KOF ? GestureMoves.BUTTON_NAMES_KOF : GestureMoves.BUTTON_NAMES, (d, which) -> {
+				String button = (id < 0 ? GestureMoves.BUTTONS_BB : GestureMoves.BUTTONS)[which];
 				prefs.edit().putString(gestureKey(id, slot), motion + button).apply();
 				refreshGestures();
 			})
 			.setNegativeButton("Atrás", (d, w) -> showMotionPicker(id, slot))
 			.show();
+	}
+
+	private static String gestureSlotName(int id, int slot) {
+		if (slot == 3 && id == GESTURE_BB) {
+			return "Distortion Drive";
+		}
+		if (slot == 3 && id == GESTURE_KOF) {
+			return "Súper";
+		}
+		return GestureMoves.SLOT_NAMES[slot];
 	}
 
 	private void confirmResetGestureMoves(int id) {
@@ -1867,8 +2450,8 @@ public class LauncherActivity extends Activity {
 
 		StringBuilder s = new StringBuilder();
 		if (!isProfileGame()) {
-			s.append(isBlazBlue()
-				? "⚠ Con BlazBlue no se usa: el visor lee la memoria de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
+			s.append(gameKind() != GameInspector.KIND_GG
+				? "⚠ Con " + gameShortName() + " no se usa: el visor lee la memoria de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
 				: "⚠ Tu copia es " + prefs.getString(K_ID, "") + ". El visor solo funciona con la versión americana (ULUS-10409).\n\n");
 		}
 		s.append("Experimental. Al empezar cada combate tarda unos segundos en encontrar las cajas: el progreso sale abajo a la izquierda del juego. "
@@ -2167,9 +2750,15 @@ public class LauncherActivity extends Activity {
 		styleChip(stylePsp, !arcade);
 		styleChip(styleArcade, arcade);
 		controlsPreview.setArcade(arcade);
-		boolean bb = isBlazBlue();
-		controlsPreview.setBlazBlue(bb);
-		if (bb) {
+		int kind = gameKind();
+		boolean bb = kind == GameInspector.KIND_BB;
+		controlsPreview.setKind(kind);
+		if (kind == GameInspector.KIND_KOF) {
+			styleDesc.setText(arcade
+				? "Como en la máquina Neo Geo: A, B, C y D en arco. La cruceta, el stick, L, R, Start y Select siguen ahí."
+				: "Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. En KOF: □ = A, ✕ = B, △ = C, ○ = D.");
+			padNote.setText("Los controles funcionan solos: X = A (□), A = B (✕), Y = C (△) y B = D (○). Puedes reasignarlos dentro del juego en sus opciones.");
+		} else if (bb) {
 			styleDesc.setText(arcade
 				? "Como en la máquina de BlazBlue: A, B y C arriba y D (Drive) abajo. La cruceta, el stick, L, R, Start y Select siguen ahí."
 				: "Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. En BlazBlue: □ = A, △ = B, ○ = C, ✕ = D.");
@@ -2181,7 +2770,7 @@ public class LauncherActivity extends Activity {
 			styleDesc.setText("Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. "
 				+ "En este juego: □ = P, ✕ = K, △ = S, ○ = HS, R = D.");
 		}
-		if (!bb) {
+		if (kind == GameInspector.KIND_GG) {
 			padNote.setText("Los controles funcionan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D y L1 = Respeto. Puedes reasignarlos dentro del juego en Ajustes → Controles.");
 		}
 	}
@@ -2265,17 +2854,45 @@ public class LauncherActivity extends Activity {
 
 		// Game
 		LinearLayout game = section(col, "JUEGO");
+		LinearLayout gameRow = new LinearLayout(this);
+		gameRow.setOrientation(LinearLayout.HORIZONTAL);
+		gameIcon = new IconView(this);
+		GradientDrawable iconBg = new GradientDrawable();
+		iconBg.setColor(0xFF101015);
+		iconBg.setCornerRadius(dp(10));
+		gameIcon.setBackground(iconBg);
+		gameIcon.setClipToOutline(true);
+		gameIcon.setVisibility(View.GONE);
+		makeClickable(gameIcon);
+		gameIcon.setOnClickListener(v -> showCatalog());
+		LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(104), ViewGroup.LayoutParams.WRAP_CONTENT);
+		iconLp.rightMargin = dp(14);
+		iconLp.topMargin = dp(2);
+		gameRow.addView(gameIcon, iconLp);
+		LinearLayout gameTexts = new LinearLayout(this);
+		gameTexts.setOrientation(LinearLayout.VERTICAL);
 		gameStatus = text("", 17, C_TEXT, true);
-		game.addView(gameStatus);
+		gameTexts.addView(gameStatus);
 		gameDetail = text("", 13, C_MUTED, false);
-		gameDetail.setPadding(0, dp(4), 0, dp(14));
-		game.addView(gameDetail);
+		gameDetail.setPadding(0, dp(4), 0, 0);
+		gameTexts.addView(gameDetail);
+		gameRow.addView(gameTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		game.addView(gameRow);
+		catalogButton = text("CATÁLOGO", 15, C_TEXT, true);
+		catalogButton.setGravity(Gravity.CENTER);
+		catalogButton.setLetterSpacing(0.08f);
+		catalogButton.setPadding(dp(16), dp(13), dp(16), dp(13));
+		catalogButton.setBackground(ripple(0x22D7263D, C_ACCENT, 14));
+		makeClickable(catalogButton);
+		catalogButton.setOnClickListener(v -> showCatalog());
+		LinearLayout.LayoutParams catLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		catLp.topMargin = dp(14);
+		game.addView(catalogButton, catLp);
 		TextView pick = outlineButton("Añadir o cambiar de juego (ISO / CSO)");
 		pick.setOnClickListener(v -> pickGame());
-		game.addView(pick, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-		libraryBox = new LinearLayout(this);
-		libraryBox.setOrientation(LinearLayout.VERTICAL);
-		game.addView(libraryBox);
+		LinearLayout.LayoutParams pickLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		pickLp.topMargin = dp(8);
+		game.addView(pick, pickLp);
 
 		// Device test (DeviceBenchmark)
 		LinearLayout bench = section(col, "TU EQUIPO");
@@ -2525,7 +3142,7 @@ public class LauncherActivity extends Activity {
 		gestureMoveRows.setOrientation(LinearLayout.VERTICAL);
 		gestureOptions.addView(gestureMoveRows);
 		TextView resetMoves = outlineButton("Restablecer este personaje");
-		resetMoves.setOnClickListener(v -> confirmResetGestureMoves(isBlazBlue() ? GESTURE_BB : gestureChar));
+		resetMoves.setOnClickListener(v -> confirmResetGestureMoves(isBlazBlue() ? GESTURE_BB : isKof() ? GESTURE_KOF : gestureChar));
 		LinearLayout.LayoutParams resetMovesParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		resetMovesParams.topMargin = dp(12);
 		gestureOptions.addView(resetMoves, resetMovesParams);
