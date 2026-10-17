@@ -1,5 +1,7 @@
 // GGXX AC+ launcher build: touch gestures in the style of Skullgirls Mobile.
 //
+// Buttons are Guilty Gear's (P K S HS D) or BlazBlue's (A B C D): see ButtonMap.
+//
 //   Tap ........................ attack chain P -> K -> S -> HS (taps close together)
 //   Swipe left / right ......... dash / back dash (keep the finger down to keep running)
 //   Swipe up (or diagonally) ... jump, straight or toward that side
@@ -61,6 +63,35 @@ const u32 REL_BACK = 1u << 29;
 // Every button this module may press (it only releases what it pressed itself).
 const u32 kOwned = kDirs | kAttacks | PSP_START;
 
+// What each gesture presses, per game.
+struct ButtonMap {
+	u32 chain[4];             // taps in a row
+	int chainLength;
+	const char *chainNames[4];
+	u32 drive;                // two-finger tap
+	const char *driveName;
+	u32 sweep;                // swipe down (held with down)
+	const char *sweepName;
+	u32 throwButtons;         // two-finger swipe, with that direction
+	u32 rapidCancel;
+	u32 burst;
+	bool blazblue;            // move letters A B C D instead of P K S HS D
+};
+
+// Guilty Gear (PSP defaults): square P, cross K, triangle S, circle HS, R Dust.
+inline ButtonMap GuiltyGearMap() {
+	return ButtonMap{ { BTN_P, BTN_K, BTN_S, BTN_HS }, 4, { "P", "K", "S", "HS" },
+		BTN_D, "D", BTN_D, "2D", BTN_HS, BTN_P | BTN_K | BTN_S, BTN_D | BTN_HS, false };
+}
+
+// BlazBlue (PSP defaults): square A, triangle B, circle C, cross D (Drive).
+// Throw B+C, Rapid Cancel A+B+C, Barrier Burst A+B+C+D.
+inline ButtonMap BlazBlueMap() {
+	return ButtonMap{ { PSP_SQUARE, PSP_TRIANGLE, PSP_CIRCLE, 0 }, 3, { "A", "B", "C", "" },
+		PSP_CROSS, "D", PSP_CIRCLE, "2C", PSP_TRIANGLE | PSP_CIRCLE,
+		PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE, PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE | PSP_CROSS, true };
+}
+
 inline u32 CancelOpposites(u32 m) {
 	if ((m & (PSP_LEFT | PSP_RIGHT)) == (PSP_LEFT | PSP_RIGHT))
 		m &= ~(PSP_LEFT | PSP_RIGHT);
@@ -104,7 +135,8 @@ struct Motion {
 	bool valid = false;
 };
 
-inline Motion ParseMotion(const std::string &spec) {
+// blazblue: buttons are A B C D (square, triangle, circle, cross) instead of P K S HS D.
+inline Motion ParseMotion(const std::string &spec, bool blazblue = false) {
 	Motion m;
 	std::string s;
 	for (char c : spec) {
@@ -123,6 +155,17 @@ inline Motion ParseMotion(const std::string &spec) {
 		i++;
 	}
 	while (i < s.size()) {
+		if (blazblue) {
+			switch (s[i]) {
+			case 'A': m.buttons |= PSP_SQUARE; break;
+			case 'B': m.buttons |= PSP_TRIANGLE; break;
+			case 'C': m.buttons |= PSP_CIRCLE; break;
+			case 'D': m.buttons |= PSP_CROSS; break;
+			default: return m;   // invalid
+			}
+			i++;
+			continue;
+		}
 		if (s.compare(i, 2, "HS") == 0) { m.buttons |= BTN_HS; i += 2; continue; }
 		switch (s[i]) {
 		case 'P': m.buttons |= BTN_P; break;
@@ -329,6 +372,9 @@ public:
 	}
 	const std::vector<Button> &Buttons() const { return buttons_; }
 
+	void SetButtonMap(const ButtonMap &map) { map_ = map; }
+	const ButtonMap &Map() const { return map_; }
+
 	void SetMove(int slot, const Motion &m) {
 		if (slot >= 0 && slot < 4)
 			moves_[slot] = m;
@@ -533,15 +579,14 @@ private:
 	}
 
 	void Tap(int id, double t) {
-		static const u32 chain[4] = { BTN_P, BTN_K, BTN_S, BTN_HS };
-		static const char *const names[4] = { "P", "K", "S", "HS" };
+		const int n = std::max(1, std::min(4, map_.chainLength));
 		if (lastTap_ >= 0 && t - lastTap_ <= params.chainWindow)
-			chainIndex_ = (chainIndex_ + 1) % 4;
+			chainIndex_ = (chainIndex_ + 1) % n;
 		else
 			chainIndex_ = 0;
 		lastTap_ = t;
-		seq_->Push(PressSteps(chain[chainIndex_]));
-		AddFx(FX_TAP, ptr_[id].x, ptr_[id].y, 0, 0, names[chainIndex_], t);
+		seq_->Push(PressSteps(map_.chain[chainIndex_]));
+		AddFx(FX_TAP, ptr_[id].x, ptr_[id].y, 0, 0, map_.chainNames[chainIndex_], t);
 	}
 
 	void Swipe(int id, double t) {
@@ -569,8 +614,8 @@ private:
 			label = "Salto";
 			p.state = P_DONE;
 		} else {
-			seq_->Push({ Step{ PSP_DOWN, 1, true, 0 }, Step{ PSP_DOWN | BTN_D, kPressFrames, true, 0 }, Step{ 0, 1, false, 0 } });
-			label = "2D";
+			seq_->Push({ Step{ PSP_DOWN, 1, true, 0 }, Step{ PSP_DOWN | map_.sweep, kPressFrames, true, 0 }, Step{ 0, 1, false, 0 } });
+			label = map_.sweepName;
 			p.state = P_DONE;
 		}
 		AddFx(FX_SWIPE, p.x0, p.y0, p.x, p.y, label, t);
@@ -630,7 +675,7 @@ private:
 				const float fa = std::fabs(an);
 				if (fa <= 45.0f || fa >= 135.0f) {
 					const u32 dir = fa <= 45.0f ? PSP_RIGHT : PSP_LEFT;
-					seq_->Push({ Step{ dir, 1, true, 0 }, Step{ dir | BTN_HS, kPressFrames, true, 0 }, Step{ 0, 1, false, 0 } });
+					seq_->Push({ Step{ dir, 1, true, 0 }, Step{ dir | map_.throwButtons, kPressFrames, true, 0 }, Step{ 0, 1, false, 0 } });
 					AddFx(FX_TWO, cx - dx, cy - dy, cx, cy, "Agarre", t);
 				} else if (an > 0.0f) {
 					seq_->Push({ Step{ PSP_DOWN, 2, true, 0 }, Step{ PSP_UP, 3, true, 0 }, Step{ 0, 1, false, 0 } });
@@ -657,8 +702,8 @@ private:
 			const Pointer &b = ptr_[group_.b];
 			const float dx = (a.x + b.x - a.x0 - b.x0) * 0.5f, dy = (a.y + b.y - a.y0 - b.y0) * 0.5f;
 			if (std::sqrt(dx * dx + dy * dy) < params.swipeDist) {
-				seq_->Push(PressSteps(BTN_D));
-				AddFx(FX_TWO, (a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, 0, 0, "D", t);
+				seq_->Push(PressSteps(map_.drive));
+				AddFx(FX_TWO, (a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, 0, 0, map_.driveName, t);
 			}
 		}
 		if (group_.state == G_BLOCK)
@@ -687,11 +732,11 @@ private:
 			break;
 		}
 		case ACT_RC:
-			seq_->Push(PressSteps(BTN_P | BTN_K | BTN_S, 2));
+			seq_->Push(PressSteps(map_.rapidCancel, 2));
 			AddFx(FX_BUTTON, b.x, b.y, 0, 0, "RC", t);
 			break;
 		case ACT_BURST:
-			seq_->Push(PressSteps(BTN_D | BTN_HS, 2));
+			seq_->Push(PressSteps(map_.burst, 2));
 			AddFx(FX_BUTTON, b.x, b.y, 0, 0, "Burst", t);
 			break;
 		case ACT_START:
@@ -721,6 +766,7 @@ private:
 	std::vector<Button> buttons_;
 	std::vector<Zone> zones_;
 	Motion moves_[4];
+	ButtonMap map_ = GuiltyGearMap();
 	std::vector<Fx> fx_;
 	double lastTap_ = -1.0;
 	int chainIndex_ = 0;

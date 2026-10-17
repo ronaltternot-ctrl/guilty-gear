@@ -47,6 +47,16 @@ static const int kCharacters = 25;
 static const u32 kSelectAddress[2] = { 0x08C6BB58, 0x08C6BB5A };
 static const char *const kGameId = "ULUS10409";
 
+// BlazBlue: Calamity Trigger (US, EU, JP) and Continuum Shift II (US, EU, JP, Asia): same buttons.
+inline bool IsBlazBlue(const std::string &id) {
+	static const char *const ids[] = { "ULUS10519", "ULES01497", "ULJM05613", "ULUS10579", "ULES01526", "ULJM05850", "UCAS40337" };
+	for (const char *b : ids) {
+		if (id == b)
+			return true;
+	}
+	return false;
+}
+
 struct State {
 	bool loaded = false;
 	bool active = false;
@@ -56,6 +66,8 @@ struct State {
 	float opacity = 0.6f;
 	float scale = 1.0f;
 	std::string moves[kCharacters + 1][4];
+	std::string movesBlazBlue[4];   // BlazBlue: one set for all characters
+	bool blazblue = false;
 
 	AcGesture::Sequencer seq;
 	AcGesture::Recognizer rec{ &seq };
@@ -105,19 +117,24 @@ inline void LoadSettings() {
 	sec->Get("Scale", &scale);
 	s.opacity = std::clamp(opacity, 10, 100) / 100.0f;
 	s.scale = std::clamp(scale, 60, 160) / 100.0f;
-	for (int id = 0; id <= kCharacters; id++) {
-		std::string line;
-		if (!sec->Get(StringFromFormat("Moves%d", id).c_str(), &line))
-			continue;
+	auto split = [](const std::string &line, std::string *out) {
 		size_t start = 0;
 		for (int slot = 0; slot < 4 && start <= line.size(); slot++) {
 			size_t comma = line.find(',', start);
-			s.moves[id][slot] = line.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+			out[slot] = line.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
 			if (comma == std::string::npos)
 				break;
 			start = comma + 1;
 		}
+	};
+	for (int id = 0; id <= kCharacters; id++) {
+		std::string line;
+		if (sec->Get(StringFromFormat("Moves%d", id).c_str(), &line))
+			split(line, s.moves[id]);
 	}
+	std::string bbLine;
+	if (sec->Get("MovesBB", &bbLine))
+		split(bbLine, s.movesBlazBlue);
 	s.active = enabled;
 	if (s.active)
 		g_ctrlVblankHook = &VblankHook;
@@ -156,6 +173,12 @@ inline void HidePadButtons(TouchControlConfig *c) {
 inline void ApplyMoves(int id) {
 	State &s = Get();
 	s.character = id;
+	if (s.blazblue) {
+		static const char *const defaults[4] = { "236A", "623C", "214B", "632146C" };
+		for (int slot = 0; slot < 4; slot++)
+			s.rec.SetMove(slot, AcGesture::ParseMotion(s.movesBlazBlue[slot].empty() ? defaults[slot] : s.movesBlazBlue[slot], true));
+		return;
+	}
 	for (int slot = 0; slot < 4; slot++) {
 		std::string m = (id > 0 && !s.moves[id][slot].empty()) ? s.moves[id][slot] : s.moves[0][slot];
 		s.rec.SetMove(slot, AcGesture::ParseMotion(m));
@@ -169,8 +192,12 @@ inline void Update() {
 	State &s = Get();
 	if (!s.booted) {
 		s.booted = true;
-		s.usGame = g_paramSFO.GetValueString("DISC_ID") == kGameId;
+		const std::string discId = g_paramSFO.GetValueString("DISC_ID");
+		s.usGame = discId == kGameId;
+		s.blazblue = IsBlazBlue(discId);
+		s.rec.SetButtonMap(s.blazblue ? AcGesture::BlazBlueMap() : AcGesture::GuiltyGearMap());
 		ApplyMoves(0);
+		INFO_LOG(Log::System, "AcPlus: gestures for %s (%s)", s.blazblue ? "BlazBlue" : "Guilty Gear", discId.c_str());
 	}
 
 	// Whose special moves: the player's character, once it reads the same a few times.

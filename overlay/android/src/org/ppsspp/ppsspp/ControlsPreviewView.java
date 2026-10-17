@@ -38,6 +38,7 @@ final class ControlsPreviewView extends View {
 	private final RectF rect = new RectF();
 	private final Path path = new Path();
 	private boolean arcade;
+	private boolean blazblue;
 
 	ControlsPreviewView(Context context) {
 		super(context);
@@ -55,9 +56,18 @@ final class ControlsPreviewView extends View {
 		}
 	}
 
+	/** BlazBlue's arcade buttons are A, B, C and D. */
+	void setBlazBlue(boolean blazblue) {
+		if (this.blazblue != blazblue) {
+			this.blazblue = blazblue;
+			updateDescription();
+			invalidate();
+		}
+	}
+
 	private void updateDescription() {
 		setContentDescription(arcade
-			? "Vista previa: botones arcade K, S y HS arriba, P y D abajo"
+			? (blazblue ? "Vista previa: botones arcade A, B y C arriba, D abajo" : "Vista previa: botones arcade K, S y HS arriba, P y D abajo")
 			: "Vista previa: botones de PSP triángulo, círculo, equis y cuadrado");
 	}
 
@@ -123,11 +133,12 @@ final class ControlsPreviewView extends View {
 		drawPill(canvas, left + w * (arcade ? 0.56f : 0.64f), pillY, r, "START");
 
 		if (arcade) {
-			String[] names = { "K", "S", "HS", "P", "D" };
-			int[] colors = { C_K, C_S, C_HS, C_P, C_D };
+			String[] names = blazblue ? new String[] { "A", "B", "C", "D" } : new String[] { "K", "S", "HS", "P", "D" };
+			int[] colors = blazblue ? new int[] { C_P, C_S, C_HS, C_D } : new int[] { C_K, C_S, C_HS, C_P, C_D };
+			float[][] positions = blazblue ? LauncherActivity.BB_ARCADE_POSITIONS : LauncherActivity.ARCADE_POSITIONS;
 			for (int i = 0; i < names.length; i++) {
-				float cx = left + w * LauncherActivity.ARCADE_POSITIONS[i][0];
-				float cy = top + h * LauncherActivity.ARCADE_POSITIONS[i][1];
+				float cx = left + w * positions[i][0];
+				float cy = top + h * positions[i][1];
 				drawRound(canvas, cx, cy, r, colors[i]);
 				label.setColor(colors[i]);
 				label.setTextSize(r * (names[i].length() > 1 ? 0.82f : 1.0f));

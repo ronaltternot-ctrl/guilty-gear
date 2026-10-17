@@ -14,6 +14,9 @@ final class GestureMoves {
 	/** For characters without their own move in a slot, and for other versions of the game. */
 	static final String[] GENERIC = { "236S", "623S", "214K", "632146HS" };
 
+	/** BlazBlue: one set for every character (its buttons are A, B, C and D). */
+	static final String[] GENERIC_BB = { "236A", "623C", "214B", "632146C" };
+
 	/**
 	 * Defaults per character number (1 = Sol ... 25 = Justice, same order as
 	 * LauncherActivity.CHARACTERS): "input|name", or null to use the generic move.
@@ -70,6 +73,8 @@ final class GestureMoves {
 
 	static final String[] BUTTONS = { "P", "K", "S", "HS", "D" };
 	static final String[] BUTTON_NAMES = { "P · puño", "K · patada", "S · corte", "HS · corte fuerte", "D · Dust" };
+	static final String[] BUTTONS_BB = { "A", "B", "C", "D" };
+	static final String[] BUTTON_NAMES_BB = { "A · débil", "B · medio", "C · fuerte", "D · Drive" };
 
 	private static String entry(int id, int slot) {
 		if (id <= 0 || id >= DEFAULTS.length || slot < 0 || slot >= SLOTS || DEFAULTS[id].length <= slot) {
@@ -93,10 +98,10 @@ final class GestureMoves {
 		return null;
 	}
 
-	/** Splits "632146HS" into { "632146", "HS" }. */
-	static String[] split(String input) {
+	/** Splits "632146HS" into { "632146", "HS" } (BlazBlue: "236A" into { "236", "A" }). */
+	static String[] split(String input, boolean blazblue) {
 		String button = "";
-		for (String b : new String[] { "HS", "P", "K", "S", "D" }) {
+		for (String b : blazblue ? BUTTONS_BB : new String[] { "HS", "P", "K", "S", "D" }) {
 			if (input.endsWith(b)) {
 				button = b;
 				break;
@@ -105,9 +110,13 @@ final class GestureMoves {
 		return new String[] { input.substring(0, input.length() - button.length()), button };
 	}
 
-	/** "236P" -> "↓↘→ + P", "[4]6S" -> "carga ←, → + S". */
 	static String arrows(String input) {
-		String[] parts = split(input);
+		return arrows(input, false);
+	}
+
+	/** "236P" -> "↓↘→ + P", "[4]6S" -> "carga ←, → + S". */
+	static String arrows(String input, boolean blazblue) {
+		String[] parts = split(input, blazblue);
 		String motion = parts[0];
 		StringBuilder out = new StringBuilder();
 		int i = 0;
@@ -143,6 +152,13 @@ final class GestureMoves {
 
 	/** Same check as AcGesture::ParseMotion, for inputs read back from preferences. */
 	static boolean valid(String input) {
-		return input != null && input.matches("(\\[[1-9]\\][1-9]+|[1-9]*)(HS|P|K|S|D)*") && !input.isEmpty();
+		return valid(input, false);
+	}
+
+	static boolean valid(String input, boolean blazblue) {
+		if (input == null || input.isEmpty()) {
+			return false;
+		}
+		return input.matches(blazblue ? "(\\[[1-9]\\][1-9]+|[1-9]*)[ABCD]*" : "(\\[[1-9]\\][1-9]+|[1-9]*)(HS|P|K|S|D)*");
 	}
 }

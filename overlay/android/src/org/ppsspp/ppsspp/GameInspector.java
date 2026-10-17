@@ -22,7 +22,22 @@ final class GameInspector {
 
 	static final int SECTOR = 2048;
 
-	enum Match { TARGET, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
+	enum Match { TARGET, BLAZBLUE, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
+
+	/** BlazBlue: Calamity Trigger (US, EU, JP) and Continuum Shift II (US, EU, JP, Asia). */
+	private static final String[] BLAZBLUE_IDS = { "ULUS10519", "ULES01497", "ULJM05613", "ULUS10579", "ULES01526", "ULJM05850", "UCAS40337" };
+
+	static boolean isBlazBlue(String discId, String title) {
+		if (discId != null) {
+			String id = discId.replace("-", "").replace(" ", "").toUpperCase(Locale.ROOT);
+			for (String b : BLAZBLUE_IDS) {
+				if (b.equals(id)) {
+					return true;
+				}
+			}
+		}
+		return title != null && title.toUpperCase(Locale.ROOT).contains("BLAZBLUE");
+	}
 
 	static final class Result {
 		final String format;
@@ -36,6 +51,9 @@ final class GameInspector {
 		}
 
 		Match match() {
+			if (isBlazBlue(discId, title)) {
+				return Match.BLAZBLUE;
+			}
 			if (title == null) {
 				return Match.UNKNOWN;
 			}
