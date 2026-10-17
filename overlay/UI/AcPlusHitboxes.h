@@ -45,7 +45,8 @@ struct PspMem : AcHitbox::Mem {
 
 struct State {
 	bool initialized = false;
-	bool active = false;
+	bool active = false;     // draw the boxes
+	bool detect = false;     // find the fighters (also for the gesture controls' facing)
 	bool showHurt = true, showHit = true, showPivot = true, showProjectiles = true;
 	AcHitbox::Detector detector;
 	std::vector<AcHitbox::Box> boxes;
@@ -78,10 +79,16 @@ inline void Init() {
 	IniFile ini;
 	if (!ini.Load(g_Config.internalDataDirectory / "acplus.ini"))
 		return;
+	bool gestures = false;
+	if (const Section *g = ini.GetSection("Gestures"))
+		g->Get("Enabled", &gestures);
 	const Section *sec = ini.GetSection("Hitboxes");
-	if (!sec)
-		return;
 	bool enabled = false;
+	if (!sec) {
+		const std::string gameId = g_paramSFO.GetValueString("DISC_ID");
+		s.detect = gestures && gameId == kGameId;
+		return;
+	}
 	sec->Get("Enabled", &enabled);
 	sec->Get("Hurtboxes", &s.showHurt);
 	sec->Get("Hitboxes", &s.showHit);
@@ -105,8 +112,9 @@ inline void Init() {
 
 	const std::string gameId = g_paramSFO.GetValueString("DISC_ID");
 	s.active = enabled && gameId == kGameId;
+	s.detect = (enabled || gestures) && gameId == kGameId;
 	s.reportPath = GetSysDirectory(DIRECTORY_SYSTEM) / "acplus_hitbox_report.txt";
-	INFO_LOG(Log::System, "AcPlus: hitbox viewer %s (game %s)", s.active ? "on" : "off", gameId.c_str());
+	INFO_LOG(Log::System, "AcPlus: hitbox viewer %s, detection %s (game %s)", s.active ? "on" : "off", s.detect ? "on" : "off", gameId.c_str());
 }
 
 inline void WriteReport(const PspMem &m) {
@@ -136,7 +144,7 @@ inline void WriteReport(const PspMem &m) {
 inline void Update() {
 	Init();
 	State &s = Get();
-	if (!s.active)
+	if (!s.detect)
 		return;
 	PspMem m;
 	int c1 = Memory::IsValidAddress(kSelectP1) ? Memory::Read_U8(kSelectP1) : 0;
@@ -158,6 +166,20 @@ inline void Update() {
 		s.lastReport = now;
 		WriteReport(m);
 	}
+}
+
+// World x of a fighter (0 = player 1, 1 = player 2) once the detector found them.
+inline bool FighterX(int player, int *x) {
+	State &s = Get();
+	if (!s.detect)
+		return false;
+	for (const AcHitbox::Pivot &p : s.pivots) {
+		if (p.owner == player) {
+			*x = p.x;
+			return true;
+		}
+	}
+	return false;
 }
 
 // Draws over the game picture. Call from EmuScreen::renderUI() before the touch controls.

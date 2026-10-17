@@ -88,6 +88,27 @@ public class LauncherActivity extends Activity {
 	private static final String K_HB_PIVOT = "hitbox_pivot";
 	private static final String K_HB_PROJ = "hitbox_projectiles";
 	private static final String K_HB_MANUAL = "hitbox_manual";
+	private static final String K_GESTURES = "gestures";
+	private static final String K_GES_SCALE = "gesture_scale";
+	private static final String K_GES_ALPHA = "gesture_opacity";
+	private static final String K_GES_MOVE = "gesture_move_";
+
+	private static final int[] GES_SCALES = { 80, 100, 125 };
+	private static final String[] GES_SCALE_LABELS = { "Pequeños", "Normales", "Grandes" };
+	private static final int[] GES_ALPHAS = { 35, 60, 85 };
+	private static final String[] GES_ALPHA_LABELS = { "Suave", "Media", "Fuerte" };
+
+	private static final String GESTURE_GUIDE =
+		"• Toca: golpe. Toques seguidos hacen la cadena P → K → S → HS.\n"
+		+ "• Desliza → o ←: dash hacia ese lado (hacia el rival es dash, hacia atrás es backdash). Si dejas el dedo, sigues corriendo.\n"
+		+ "• Desliza ↑, ↗ o ↖: saltar.\n"
+		+ "• Desliza ↓: barrida (2D).\n"
+		+ "• Toca con dos dedos: Dust (D).\n"
+		+ "• Desliza con dos dedos → o ←: agarre. Hacia arriba: supersalto.\n"
+		+ "• Mantén dos dedos: bloquear. Bájalos un poco para bloquear agachado.\n"
+		+ "• Mantén un dedo y arrástralo: stick para caminar, agacharte, bloquear o saltar.\n"
+		+ "• Botones de la derecha: los especiales y el Overdrive de tu personaje (el movimiento sale solo), RC (Roman Cancel) y Burst.\n"
+		+ "• Arriba a la izquierda: Start, ✕ y ○ para los menús, y una flecha que indica hacia dónde miras. Si los especiales salen al revés, tócala.";
 
 	/** Hitbox viewer parts, in the order of the switches; ini keys read by UI/AcPlusHitboxes.h. */
 	private static final String[] HB_KEYS = { K_HB_HURT, K_HB_HIT, K_HB_PIVOT, K_HB_PROJ };
@@ -219,6 +240,15 @@ public class LauncherActivity extends Activity {
 	private final Switch[] hitboxParts = new Switch[HB_KEYS.length];
 	private TextView hitboxStatus;
 	private EditText hitboxManual;
+	private Switch gestureSwitch;
+	private LinearLayout gestureOptions;
+	private final TextView[] gestureSizeChips = new TextView[GES_SCALES.length];
+	private final TextView[] gestureAlphaChips = new TextView[GES_ALPHAS.length];
+	private TextView gestureSide1p;
+	private TextView gestureSide2p;
+	private TextView gestureCharButton;
+	private LinearLayout gestureMoveRows;
+	private int gestureChar = 1;
 	private final TextView[] netChips = new TextView[NET_MODES.length];
 	private EditText nickInput;
 	private LinearLayout netHostPanel;
@@ -440,7 +470,8 @@ public class LauncherActivity extends Activity {
 
 		int res = clampRes(prefs.getInt(K_RES, recommendedRes));
 		boolean vulkan = BACKEND_VULKAN.equals(prefs.getString(K_BACKEND, defaultBackend()));
-		boolean touch = prefs.getBoolean(K_TOUCH, true);
+		// Gesture controls keep the pause button of the touch controls.
+		boolean touch = prefs.getBoolean(K_TOUCH, true) || prefs.getBoolean(K_GESTURES, false);
 		boolean fps = prefs.getBoolean(K_FPS, false);
 
 		String style = prefs.getString(K_STYLE, STYLE_PSP);
@@ -562,7 +593,8 @@ public class LauncherActivity extends Activity {
 
 		StringBuilder ini = new StringBuilder();
 		ini.append("[Profiles]\n")
-			.append("Enabled = ").append(prefs.getBoolean(K_PROFILES, true) ? "True" : "False").append('\n')
+			// With gestures there are no buttons to swap.
+			.append("Enabled = ").append(prefs.getBoolean(K_PROFILES, true) && !prefs.getBoolean(K_GESTURES, false) ? "True" : "False").append('\n')
 			.append("Side = ").append(prefs.getInt(K_SIDE, 0)).append('\n')
 			.append("DefaultStyle = ").append(prefs.getString(K_STYLE, STYLE_PSP)).append('\n')
 			.append("[Characters]\n");
@@ -578,6 +610,17 @@ public class LauncherActivity extends Activity {
 			ini.append(HB_INI_KEYS[i]).append(" = ").append(prefs.getBoolean(HB_KEYS[i], true) ? "True" : "False").append('\n');
 		}
 		ini.append(hitboxManualLines(prefs.getString(K_HB_MANUAL, "")));
+		ini.append("[Gestures]\n")
+			.append("Enabled = ").append(prefs.getBoolean(K_GESTURES, false) ? "True" : "False").append('\n')
+			.append("Scale = ").append(prefs.getInt(K_GES_SCALE, 100)).append('\n')
+			.append("Opacity = ").append(prefs.getInt(K_GES_ALPHA, 60)).append('\n');
+		for (int id = 0; id < CHARACTERS.length; id++) {
+			ini.append("Moves").append(id).append(" = ");
+			for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
+				ini.append(slot == 0 ? "" : ",").append(gestureMove(id, slot));
+			}
+			ini.append('\n');
+		}
 		writeText(new File(getFilesDir(), "acplus.ini"), ini.toString());
 	}
 
@@ -813,6 +856,7 @@ public class LauncherActivity extends Activity {
 		refreshProfiles();
 		refreshNetwork();
 		refreshHitboxes();
+		refreshGestures();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -945,6 +989,10 @@ public class LauncherActivity extends Activity {
 		int side = prefs.getInt(K_SIDE, 0);
 		styleChip(side1p, side == 0);
 		styleChip(side2p, side == 1);
+		if (gestureSide1p != null) {
+			styleChip(gestureSide1p, side == 0);
+			styleChip(gestureSide2p, side == 1);
+		}
 		profilesOptions.setAlpha(on ? 1f : 0.45f);
 		int saved = 0;
 		int custom = 0;
@@ -963,6 +1011,122 @@ public class LauncherActivity extends Activity {
 		s.append(custom == 0 ? "Todos usan el tipo de botones general." : custom + (custom == 1 ? " personaje tiene" : " personajes tienen") + " un tipo de botones propio.");
 		s.append(saved == 0 ? "" : "\n" + saved + (saved == 1 ? " personaje tiene" : " personajes tienen") + " una distribución guardada.");
 		profilesStatus.setText(s.toString());
+	}
+
+	/** A special move button's input: chosen in the launcher, or the character's default. */
+	private String gestureMove(int id, int slot) {
+		String custom = prefs.getString(K_GES_MOVE + id + "_" + slot, null);
+		if (GestureMoves.valid(custom)) {
+			return custom;
+		}
+		return id == 0 ? GestureMoves.GENERIC[slot] : GestureMoves.defaultMove(id, slot);
+	}
+
+	private String gestureCharName(int id) {
+		return id == 0 ? "General" : CHARACTERS[id];
+	}
+
+	private void refreshGestures() {
+		boolean on = prefs.getBoolean(K_GESTURES, false);
+		gestureSwitch.setChecked(on);
+		gestureOptions.setAlpha(on ? 1f : 0.45f);
+		int scale = prefs.getInt(K_GES_SCALE, 100);
+		for (int i = 0; i < GES_SCALES.length; i++) {
+			styleChip(gestureSizeChips[i], GES_SCALES[i] == scale);
+		}
+		int alpha = prefs.getInt(K_GES_ALPHA, 60);
+		for (int i = 0; i < GES_ALPHAS.length; i++) {
+			styleChip(gestureAlphaChips[i], GES_ALPHAS[i] == alpha);
+		}
+		int side = prefs.getInt(K_SIDE, 0);
+		styleChip(gestureSide1p, side == 0);
+		styleChip(gestureSide2p, side == 1);
+		gestureCharButton.setText("Personaje: " + gestureCharName(gestureChar) + "  ▾");
+
+		gestureMoveRows.removeAllViews();
+		for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
+			final int s = slot;
+			String move = gestureMove(gestureChar, slot);
+			String name = gestureChar == 0 ? null : GestureMoves.name(gestureChar, slot, move);
+			boolean custom = prefs.getString(K_GES_MOVE + gestureChar + "_" + slot, null) != null;
+			LinearLayout row = new LinearLayout(this);
+			row.setOrientation(LinearLayout.VERTICAL);
+			row.setPadding(dp(14), dp(10), dp(14), dp(10));
+			row.setBackground(ripple(Color.TRANSPARENT, C_CHIP_STROKE, 12));
+			makeClickable(row);
+			row.addView(text(GestureMoves.SLOT_NAMES[slot] + "  ·  " + move, 15, C_TEXT, true));
+			String detail = GestureMoves.arrows(move) + (name != null ? "  ·  " + name : custom ? "  ·  elegido por ti" : "");
+			row.addView(text(detail, 13, C_MUTED, false));
+			row.setOnClickListener(v -> showMotionPicker(gestureChar, s));
+			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+			lp.topMargin = dp(8);
+			gestureMoveRows.addView(row, lp);
+		}
+	}
+
+	private void showGestureCharacterPicker() {
+		String[] rows = new String[CHARACTERS.length];
+		rows[0] = "General (otras versiones del juego o sin detectar)";
+		for (int id = 1; id < CHARACTERS.length; id++) {
+			rows[id] = CHARACTERS[id];
+		}
+		new AlertDialog.Builder(this)
+			.setTitle("Especiales de…")
+			.setItems(rows, (d, which) -> {
+				gestureChar = which;
+				refreshGestures();
+			})
+			.setNegativeButton("Cerrar", null)
+			.show();
+	}
+
+	private void showMotionPicker(int id, int slot) {
+		final String[][] motions = GestureMoves.MOTIONS;
+		String[] rows = new String[motions.length + 1];
+		for (int i = 0; i < motions.length; i++) {
+			rows[i] = motions[i][1] + (motions[i][0].isEmpty() ? "" : "   (" + motions[i][0] + ")");
+		}
+		String def = id == 0 ? GestureMoves.GENERIC[slot] : GestureMoves.defaultMove(id, slot);
+		rows[motions.length] = "Volver al predeterminado: " + def;
+		new AlertDialog.Builder(this)
+			.setTitle(gestureCharName(id) + " · " + GestureMoves.SLOT_NAMES[slot] + ": movimiento")
+			.setItems(rows, (d, which) -> {
+				if (which == motions.length) {
+					prefs.edit().remove(K_GES_MOVE + id + "_" + slot).apply();
+					refreshGestures();
+				} else {
+					showButtonPicker(id, slot, motions[which][0]);
+				}
+			})
+			.setNegativeButton("Cancelar", null)
+			.show();
+	}
+
+	private void showButtonPicker(int id, int slot, String motion) {
+		new AlertDialog.Builder(this)
+			.setTitle((motion.isEmpty() ? "" : GestureMoves.arrows(motion) + " + ") + "¿qué botón?")
+			.setItems(GestureMoves.BUTTON_NAMES, (d, which) -> {
+				prefs.edit().putString(K_GES_MOVE + id + "_" + slot, motion + GestureMoves.BUTTONS[which]).apply();
+				refreshGestures();
+			})
+			.setNegativeButton("Atrás", (d, w) -> showMotionPicker(id, slot))
+			.show();
+	}
+
+	private void confirmResetGestureMoves(int id) {
+		new AlertDialog.Builder(this)
+			.setTitle("¿Restablecer los especiales de " + gestureCharName(id) + "?")
+			.setMessage("Los cuatro botones vuelven a los movimientos predeterminados.")
+			.setPositiveButton("Restablecer", (d, w) -> {
+				SharedPreferences.Editor e = prefs.edit();
+				for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
+					e.remove(K_GES_MOVE + id + "_" + slot);
+				}
+				e.apply();
+				refreshGestures();
+			})
+			.setNegativeButton("Cancelar", null)
+			.show();
 	}
 
 	/** Diagnostics written by the emulator while the viewer is on (UI/AcPlusHitboxes.h). */
@@ -1506,6 +1670,100 @@ public class LauncherActivity extends Activity {
 		TextView padNote = text("Los controles funcionan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D y L1 = Respeto. Puedes reasignarlos dentro del juego en Ajustes → Controles.", 13, C_MUTED, false);
 		padNote.setPadding(0, dp(12), 0, 0);
 		controls.addView(padNote);
+
+		// Gesture controls (UI/AcPlusGestures.h)
+		LinearLayout gestures = section(col, "CONTROLES POR GESTOS");
+		gestureSwitch = switchRow(gestures, "Jugar con gestos (estilo Skullgirls)",
+			"Toques y deslizamientos en vez de botones, y cada especial con un solo botón. Sustituye a los botones en pantalla; el control Bluetooth sigue funcionando.");
+		gestureSwitch.setOnCheckedChangeListener((b, checked) -> {
+			prefs.edit().putBoolean(K_GESTURES, checked).apply();
+			refreshGestures();
+		});
+		gestureOptions = new LinearLayout(this);
+		gestureOptions.setOrientation(LinearLayout.VERTICAL);
+		gestureOptions.setPadding(0, dp(14), 0, 0);
+		gestures.addView(gestureOptions);
+		gestureOptions.addView(text(GESTURE_GUIDE, 13, C_TEXT, false));
+
+		TextView sizeLabel = text("Tamaño de los botones", 15, C_TEXT, true);
+		sizeLabel.setPadding(0, dp(16), 0, 0);
+		gestureOptions.addView(sizeLabel);
+		LinearLayout sizeRow = new LinearLayout(this);
+		sizeRow.setOrientation(LinearLayout.HORIZONTAL);
+		sizeRow.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < GES_SCALES.length; i++) {
+			final int value = GES_SCALES[i];
+			gestureSizeChips[i] = chip(GES_SCALE_LABELS[i]);
+			gestureSizeChips[i].setOnClickListener(v -> {
+				prefs.edit().putInt(K_GES_SCALE, value).apply();
+				refreshGestures();
+			});
+			sizeRow.addView(gestureSizeChips[i], weighted(i == 0 ? 0 : dp(4), i == GES_SCALES.length - 1 ? 0 : dp(4)));
+		}
+		gestureOptions.addView(sizeRow);
+
+		TextView alphaLabel = text("Visibilidad", 15, C_TEXT, true);
+		alphaLabel.setPadding(0, dp(16), 0, 0);
+		gestureOptions.addView(alphaLabel);
+		LinearLayout alphaRow = new LinearLayout(this);
+		alphaRow.setOrientation(LinearLayout.HORIZONTAL);
+		alphaRow.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < GES_ALPHAS.length; i++) {
+			final int value = GES_ALPHAS[i];
+			gestureAlphaChips[i] = chip(GES_ALPHA_LABELS[i]);
+			gestureAlphaChips[i].setOnClickListener(v -> {
+				prefs.edit().putInt(K_GES_ALPHA, value).apply();
+				refreshGestures();
+			});
+			alphaRow.addView(gestureAlphaChips[i], weighted(i == 0 ? 0 : dp(4), i == GES_ALPHAS.length - 1 ? 0 : dp(4)));
+		}
+		gestureOptions.addView(alphaRow);
+
+		TextView gestureSideLabel = text("Tú juegas como", 15, C_TEXT, true);
+		gestureSideLabel.setPadding(0, dp(16), 0, 0);
+		gestureOptions.addView(gestureSideLabel);
+		LinearLayout gestureSideRow = new LinearLayout(this);
+		gestureSideRow.setOrientation(LinearLayout.HORIZONTAL);
+		gestureSideRow.setPadding(0, dp(10), 0, 0);
+		gestureSide1p = chip("Jugador 1");
+		gestureSide1p.setOnClickListener(v -> {
+			prefs.edit().putInt(K_SIDE, 0).apply();
+			refreshGestures();
+			refreshProfiles();
+		});
+		gestureSide2p = chip("Jugador 2");
+		gestureSide2p.setOnClickListener(v -> {
+			prefs.edit().putInt(K_SIDE, 1).apply();
+			refreshGestures();
+			refreshProfiles();
+		});
+		gestureSideRow.addView(gestureSide1p, weighted(0, dp(4)));
+		gestureSideRow.addView(gestureSide2p, weighted(dp(4), 0));
+		gestureOptions.addView(gestureSideRow);
+		TextView gestureSideNote = text("Sirve para saber cuál es tu personaje (y sus especiales) y hacia dónde miras al empezar.", 13, C_MUTED, false);
+		gestureSideNote.setPadding(0, dp(8), 0, 0);
+		gestureOptions.addView(gestureSideNote);
+
+		TextView movesLabel = text("Especiales de cada personaje", 15, C_TEXT, true);
+		movesLabel.setPadding(0, dp(18), 0, 0);
+		gestureOptions.addView(movesLabel);
+		TextView movesNote = text("Los botones cambian solos según tu personaje (versión ULUS-10409). Toca uno para cambiar su movimiento: la notación es la de los números del teclado, mirando a la derecha (236 = ↓↘→).", 13, C_MUTED, false);
+		movesNote.setPadding(0, dp(4), 0, dp(10));
+		gestureOptions.addView(movesNote);
+		gestureCharButton = outlineButton("Personaje");
+		gestureCharButton.setOnClickListener(v -> showGestureCharacterPicker());
+		gestureOptions.addView(gestureCharButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		gestureMoveRows = new LinearLayout(this);
+		gestureMoveRows.setOrientation(LinearLayout.VERTICAL);
+		gestureOptions.addView(gestureMoveRows);
+		TextView resetMoves = outlineButton("Restablecer este personaje");
+		resetMoves.setOnClickListener(v -> confirmResetGestureMoves(gestureChar));
+		LinearLayout.LayoutParams resetMovesParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		resetMovesParams.topMargin = dp(12);
+		gestureOptions.addView(resetMoves, resetMovesParams);
+		TextView gestureNote = text("Algunos personajes solo traen especiales genéricos: si uno no sale, cámbialo por el movimiento correcto. Con gestos no se usan los perfiles de botones por personaje.", 13, C_MUTED, false);
+		gestureNote.setPadding(0, dp(12), 0, 0);
+		gestureOptions.addView(gestureNote);
 
 		// Per-character profiles
 		LinearLayout profiles = section(col, "PERFILES POR PERSONAJE");

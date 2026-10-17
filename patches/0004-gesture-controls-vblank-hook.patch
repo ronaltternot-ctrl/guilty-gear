@@ -1,0 +1,32 @@
+diff --git a/Core/HLE/sceCtrl.cpp b/Core/HLE/sceCtrl.cpp
+index e6657bb..5d130ad 100644
+--- a/Core/HLE/sceCtrl.cpp
++++ b/Core/HLE/sceCtrl.cpp
+@@ -329,7 +329,12 @@ static void __CtrlDoSample()
+ 	}
+ }
+ 
++void (*g_ctrlVblankHook)() = nullptr;
++
+ void __CtrlVblank() {
++	if (g_ctrlVblankHook)
++		g_ctrlVblankHook();
++
+ 	emuRapidFireFrames++;
+ 	if (emuRapidFireFrames >= emuRapidFireInterval) {
+ 		emuRapidFireFrames = 0;
+diff --git a/Core/HLE/sceCtrl.h b/Core/HLE/sceCtrl.h
+index 522cc26..84b582e 100644
+--- a/Core/HLE/sceCtrl.h
++++ b/Core/HLE/sceCtrl.h
+@@ -74,6 +74,10 @@ void __CtrlVblank();
+ // Clears and sets selected buttons. NOTE: Clearing happens first.
+ void __CtrlUpdateButtons(u32 bitsToSet, u32 bitsToClear);
+ 
++// Launcher build: called on every vblank right before the controller is sampled
++// (gesture controls play their input here, one frame at a time).
++extern void (*g_ctrlVblankHook)();
++
+ // Call this to set the position of an analog stick, ideally when it changes.
+ // X and Y values should be from -1 to 1, inclusive, in a square (no need to force to a circle.)
+ // No deadzone filtering is done (but note that this applies to the actual PSP as well.)
