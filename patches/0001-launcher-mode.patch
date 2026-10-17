@@ -1,8 +1,8 @@
 diff --git a/android/AndroidManifest.xml b/android/AndroidManifest.xml
-index 8bdf525..5be2a8b 100644
+index 8bdf525..10013f9 100644
 --- a/android/AndroidManifest.xml
 +++ b/android/AndroidManifest.xml
-@@ -50,70 +50,37 @@
+@@ -50,72 +50,49 @@
          android:requestLegacyExternalStorage="true"
          android:preserveLegacyExternalStorage="true">
          <meta-data android:name="android.max_aspect" android:value="2.4" />
@@ -88,7 +88,19 @@ index 8bdf525..5be2a8b 100644
 +			android:process=":emu"
  			android:theme="@style/Theme.ProxyTransparent"
  			android:launchMode="standard" />
++        <!-- Lets the launcher share save states (hitbox viewer research). -->
++        <provider
++            android:name="androidx.core.content.FileProvider"
++            android:authorities="${applicationId}.acplus.files"
++            android:exported="false"
++            android:grantUriPermissions="true">
++            <meta-data
++                android:name="android.support.FILE_PROVIDER_PATHS"
++                android:resource="@xml/acplus_file_paths" />
++        </provider>
          <profileable android:shell="true" android:enabled="true" />
+     </application>
+ 
 diff --git a/android/build.gradle.kts b/android/build.gradle.kts
 index acf53a5..688f5b3 100644
 --- a/android/build.gradle.kts

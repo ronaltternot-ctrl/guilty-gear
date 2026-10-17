@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files the launcher can share (save states for the hitbox viewer research). -->
+<paths>
+	<external-files-path name="states" path="PSP/PPSSPP_STATE/" />
+	<files-path name="states_internal" path="memstick/PSP/PPSSPP_STATE/" />
+</paths>

@@ -29,6 +29,11 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.text.Editable;
+import android.text.InputFilter;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -41,6 +46,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -72,6 +78,24 @@ public class LauncherActivity extends Activity {
 	private static final String K_PROFILES = "character_profiles";
 	private static final String K_SIDE = "player_side";
 	private static final String K_CHAR_STYLE = "char_style_";
+	private static final String K_NET_MODE = "net_mode";
+	private static final String K_JOIN_CODE = "net_join_code";
+	private static final String K_NICK = "net_nickname";
+	private static final String K_NET_SERVER = "net_server";
+
+	private static final String NET_OFF = "off";
+	private static final String NET_HOST = "host";
+	private static final String NET_JOIN = "join";
+	private static final String NET_INTERNET = "internet";
+	private static final String[] NET_MODES = { NET_OFF, NET_HOST, NET_JOIN, NET_INTERNET };
+	private static final String[] NET_LABELS = { "Apagado", "Crear sala", "Unirme", "Internet" };
+
+	/** Public PRO ad hoc servers with relay (from PPSSPP's adhoc-servers.json). */
+	private static final String[][] NET_SERVERS = {
+		{ "socom.cc", "Socom", "Francia" },
+		{ "psp.mgn.pub", "MGN", "EE. UU." },
+		{ "jpa36a7.glddns.com", "Relay BR", "Brasil" },
+	};
 
 	private static final String BACKEND_VULKAN = "vulkan";
 	private static final String BACKEND_OPENGL = "opengl";
@@ -178,6 +202,17 @@ public class LauncherActivity extends Activity {
 	private TextView side1p;
 	private TextView side2p;
 	private TextView profilesStatus;
+	private final TextView[] netChips = new TextView[NET_MODES.length];
+	private EditText nickInput;
+	private LinearLayout netHostPanel;
+	private LinearLayout netJoinPanel;
+	private LinearLayout netInternetPanel;
+	private TextView hostCode;
+	private TextView hostDetail;
+	private EditText joinInput;
+	private TextView joinStatus;
+	private final TextView[] serverChips = new TextView[NET_SERVERS.length];
+	private TextView netSteps;
 	private LinearLayout runningCard;
 	private TextView playButton;
 
@@ -287,6 +322,25 @@ public class LauncherActivity extends Activity {
 				.show();
 			return;
 		}
+		String netMode = prefs.getString(K_NET_MODE, NET_OFF);
+		if (NET_JOIN.equals(netMode) && RoomCode.decode(prefs.getString(K_JOIN_CODE, "")) == null) {
+			showMessage("Falta el código de la sala",
+				"Escribe en «Multijugador» el código que ve tu amigo en su pantalla, o pon el multijugador en «Apagado».");
+			return;
+		}
+		if (NET_HOST.equals(netMode) && RoomCode.localAddresses().isEmpty()) {
+			new AlertDialog.Builder(this)
+				.setTitle("Sin red local")
+				.setMessage("No estás conectado a una red Wi-Fi ni compartiendo zona Wi-Fi, así que tu amigo no podrá entrar a la sala.")
+				.setPositiveButton("Jugar igualmente", (d, w) -> launch(uri))
+				.setNegativeButton("Cancelar", null)
+				.show();
+			return;
+		}
+		launch(uri);
+	}
+
+	private void launch(Uri uri) {
 		try {
 			writeEmulatorConfig();
 		} catch (IOException e) {
@@ -408,10 +462,72 @@ public class LauncherActivity extends Activity {
 		for (int i = 0; i < effect.shaders.length; i++) {
 			ini.append("PostShader").append(i + 1).append(" = ").append(effect.shaders[i]).append('\n');
 		}
+		appendNetworkConfig(ini);
 		writeText(configFile(), ini.toString());
 		prefs.edit().putString(K_APPLIED_STYLE, style).apply();
 
 		writeProfileConfig();
+	}
+
+	/**
+	 * The game's "Network" mode is PSP ad hoc (two consoles nearby). PPSSPP carries it over the
+	 * network through a PRO ad hoc server: the host runs PPSSPP's built-in one, the guest
+	 * connects to the host's address (taken from the room code).
+	 */
+	private void appendNetworkConfig(StringBuilder ini) {
+		String mode = prefs.getString(K_NET_MODE, NET_OFF);
+		ini.append("[Network]\n");
+		switch (mode) {
+			case NET_HOST: {
+				// Must be this phone's own Wi-Fi address (the one in the room code): with
+				// "localhost" PPSSPP switches to a same-device test mode that LAN players can't reach.
+				List<RoomCode.LocalAddress> addresses = RoomCode.localAddresses();
+				String self = addresses.isEmpty() ? "localhost" : addresses.get(0).ip;
+				ini.append("EnableWlan = True\n")
+					.append("EnableAdhocServer = True\n")
+					.append("proAdhocServer = ").append(self).append('\n')
+					.append("AdhocServerRelayMode = 2\n");  // Direct (P2P) on the local network.
+				break;
+			}
+			case NET_JOIN:
+				ini.append("EnableWlan = True\n")
+					.append("EnableAdhocServer = False\n")
+					.append("proAdhocServer = ").append(RoomCode.decode(prefs.getString(K_JOIN_CODE, ""))).append('\n')
+					.append("AdhocServerRelayMode = 2\n");
+				break;
+			case NET_INTERNET:
+				ini.append("EnableWlan = True\n")
+					.append("EnableAdhocServer = False\n")
+					.append("proAdhocServer = ").append(currentServer()).append('\n')
+					.append("AdhocServerRelayMode = 0\n");  // Auto: these servers relay the traffic.
+				break;
+			default:
+				ini.append("EnableWlan = False\n")
+					.append("EnableAdhocServer = False\n");
+				break;
+		}
+		ini.append("EnableUPnP = False\n")
+			.append("[SystemParam]\n")
+			.append("NickName = ").append(nickname()).append('\n');
+	}
+
+	private String nickname() {
+		String n = prefs.getString(K_NICK, "");
+		n = n.replaceAll("[^A-Za-z0-9 _\\-.]", "").trim();
+		if (n.isEmpty()) {
+			n = "Jugador";
+		}
+		return n.length() > 16 ? n.substring(0, 16) : n;
+	}
+
+	private String currentServer() {
+		String s = prefs.getString(K_NET_SERVER, NET_SERVERS[0][0]);
+		for (String[] server : NET_SERVERS) {
+			if (server[0].equals(s)) {
+				return s;
+			}
+		}
+		return NET_SERVERS[0][0];
 	}
 
 	/** Settings and the two layout presets the emulator uses for per-character profiles. */
@@ -672,6 +788,7 @@ public class LauncherActivity extends Activity {
 		refreshStyle();
 		refreshEffect();
 		refreshProfiles();
+		refreshNetwork();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -822,6 +939,147 @@ public class LauncherActivity extends Activity {
 		s.append(custom == 0 ? "Todos usan el tipo de botones general." : custom + (custom == 1 ? " personaje tiene" : " personajes tienen") + " un tipo de botones propio.");
 		s.append(saved == 0 ? "" : "\n" + saved + (saved == 1 ? " personaje tiene" : " personajes tienen") + " una distribución guardada.");
 		profilesStatus.setText(s.toString());
+	}
+
+	private void refreshNetwork() {
+		String mode = prefs.getString(K_NET_MODE, NET_OFF);
+		for (int i = 0; i < NET_MODES.length; i++) {
+			styleChip(netChips[i], NET_MODES[i].equals(mode));
+		}
+		netHostPanel.setVisibility(NET_HOST.equals(mode) ? View.VISIBLE : View.GONE);
+		netJoinPanel.setVisibility(NET_JOIN.equals(mode) ? View.VISIBLE : View.GONE);
+		netInternetPanel.setVisibility(NET_INTERNET.equals(mode) ? View.VISIBLE : View.GONE);
+
+		if (NET_HOST.equals(mode)) {
+			List<RoomCode.LocalAddress> addresses = RoomCode.localAddresses();
+			if (addresses.isEmpty()) {
+				hostCode.setText("— — — —");
+				hostDetail.setText("No estás conectado a ninguna red. Conéctate al mismo Wi-Fi que tu amigo, o activa la zona Wi-Fi del teléfono y que tu amigo se conecte a ella.");
+				hostDetail.setTextColor(C_WARN);
+			} else {
+				RoomCode.LocalAddress main = addresses.get(0);
+				hostCode.setText(RoomCode.encode(main.bytes));
+				StringBuilder d = new StringBuilder("Dile este código a tu amigo. ");
+				d.append(main.isHotspot() ? "Estás compartiendo tu zona Wi-Fi: tu amigo debe conectarse a ella." : "Tu amigo debe estar en tu misma red Wi-Fi.");
+				d.append("\nDirección: ").append(main.ip);
+				for (int i = 1; i < addresses.size(); i++) {
+					RoomCode.LocalAddress other = addresses.get(i);
+					d.append("\nEn tu otra red (").append(other.isHotspot() ? "zona Wi-Fi" : other.iface).append("): ")
+						.append(RoomCode.encode(other.bytes));
+				}
+				hostDetail.setText(d.toString());
+				hostDetail.setTextColor(C_MUTED);
+			}
+		}
+		if (NET_JOIN.equals(mode)) {
+			refreshJoinStatus();
+		}
+		if (NET_INTERNET.equals(mode)) {
+			String server = currentServer();
+			for (int i = 0; i < NET_SERVERS.length; i++) {
+				styleChip(serverChips[i], NET_SERVERS[i][0].equals(server));
+			}
+		}
+
+		String steps;
+		switch (mode) {
+			case NET_HOST:
+				steps = "1. Pulsa JUGAR primero (tu teléfono hace de sala).\n2. Tu amigo elige «Unirme», escribe el código y pulsa JUGAR.\n3. En el menú del juego entren los dos a «Network»: tú creas la partida y tu amigo se une.";
+				break;
+			case NET_JOIN:
+				steps = "1. Espera a que tu amigo haya pulsado JUGAR en «Crear sala».\n2. Pulsa JUGAR.\n3. En el menú del juego entra a «Network» y únete a la partida de tu amigo.";
+				break;
+			case NET_INTERNET:
+				steps = "Beta. Los dos eligen el mismo servidor y pulsan JUGAR. En el modo «Network» del juego verán a quien esté conectado a ese servidor con este juego. Son servidores públicos de la comunidad de PPSSPP: puede haber retraso.";
+				break;
+			default:
+				steps = "Para jugar contra un amigo con otro teléfono: el modo «Network» del juego (2 jugadores), llevado a Wi-Fi por PPSSPP.";
+				break;
+		}
+		netSteps.setText(steps);
+	}
+
+	private void refreshJoinStatus() {
+		String code = joinInput.getText().toString();
+		String ip = RoomCode.decode(code);
+		if (ip == null) {
+			String clean = code.replace("-", "").replace(" ", "");
+			joinStatus.setText(clean.isEmpty() ? "Escribe el código que aparece en el teléfono de tu amigo."
+				: clean.length() < RoomCode.LENGTH ? "Faltan " + (RoomCode.LENGTH - clean.length()) + " caracteres."
+				: "Código no válido. Revísalo con tu amigo.");
+			joinStatus.setTextColor(clean.length() >= RoomCode.LENGTH ? C_WARN : C_MUTED);
+			return;
+		}
+		String text = "✓ Sala en " + ip;
+		int color = C_OK;
+		List<RoomCode.LocalAddress> mine = RoomCode.localAddresses();
+		if (mine.isEmpty()) {
+			text += "\n⚠ No estás conectado a ninguna red Wi-Fi.";
+			color = C_WARN;
+		} else {
+			boolean sameNet = false;
+			String prefix = ip.substring(0, ip.lastIndexOf('.') + 1);
+			for (RoomCode.LocalAddress a : mine) {
+				if (a.ip.startsWith(prefix)) {
+					sameNet = true;
+					break;
+				}
+			}
+			if (!sameNet) {
+				text += "\n⚠ Parece que estás en otra red (tu dirección es " + mine.get(0).ip + "). Conéctate al mismo Wi-Fi o a la zona Wi-Fi de tu amigo.";
+				color = C_WARN;
+			}
+		}
+		joinStatus.setText(text);
+		joinStatus.setTextColor(color);
+	}
+
+	private void shareRoomCode() {
+		String code = hostCode.getText().toString();
+		if (RoomCode.decode(code) == null) {
+			return;
+		}
+		Intent send = new Intent(Intent.ACTION_SEND);
+		send.setType("text/plain");
+		send.putExtra(Intent.EXTRA_TEXT, "Únete a mi sala de Guilty Gear XX ΛC+ (GGXX AC+ en Android → Multijugador → Unirme): " + code);
+		startActivity(Intent.createChooser(send, "Compartir código de sala"));
+	}
+
+	/** Shares the emulator's save states (and their screenshots) through Android's share sheet. */
+	private void shareSaveStates() {
+		File dir = new File(memstickDir(), "PSP/PPSSPP_STATE");
+		File[] files = dir.listFiles((d, name) -> name.endsWith(".ppst") || name.endsWith(".jpg"));
+		if (files == null || files.length == 0) {
+			showMessage("Todavía no hay estados guardados",
+				"Juega en «Training» y guarda estados desde el menú de pausa (botón Atrás → «Guardar estado»). Después vuelve aquí.");
+			return;
+		}
+		java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+		ArrayList<Uri> uris = new ArrayList<>();
+		long total = 0;
+		String authority = getPackageName() + ".acplus.files";
+		for (File f : files) {
+			if (uris.size() >= 12) {
+				break;
+			}
+			try {
+				uris.add(androidx.core.content.FileProvider.getUriForFile(this, authority, f));
+				total += f.length();
+			} catch (IllegalArgumentException e) {
+				Log.w(TAG, "Cannot share " + f, e);
+			}
+		}
+		if (uris.isEmpty()) {
+			showMessage("Error", "No se pudieron preparar los archivos para enviar.");
+			return;
+		}
+		Intent send = new Intent(Intent.ACTION_SEND_MULTIPLE);
+		send.setType("application/octet-stream");
+		send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+		send.putExtra(Intent.EXTRA_TEXT, "Estados guardados de GGXX AC+ para el visor de hitboxes");
+		send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+		Log.i(TAG, "Sharing " + uris.size() + " files, " + total + " bytes");
+		startActivity(Intent.createChooser(send, "Enviar estados guardados (" + (total / (1024 * 1024) + 1) + " MB)"));
 	}
 
 	private String characterStyleLabel(int id) {
@@ -1177,6 +1435,122 @@ public class LauncherActivity extends Activity {
 		profileNote.setPadding(0, dp(12), 0, 0);
 		profilesOptions.addView(profileNote);
 
+		// Multiplayer (the game's ad hoc "Network" mode over Wi-Fi)
+		LinearLayout net = section(col, "MULTIJUGADOR");
+		net.addView(text("Tu nombre en el juego", 15, C_TEXT, true));
+		nickInput = input("Jugador", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME, 16);
+		nickInput.setText(prefs.getString(K_NICK, ""));
+		nickInput.addTextChangedListener(new SimpleWatcher(s -> prefs.edit().putString(K_NICK, s).apply()));
+		LinearLayout.LayoutParams nickParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		nickParams.topMargin = dp(8);
+		nickParams.bottomMargin = dp(14);
+		net.addView(nickInput, nickParams);
+
+		LinearLayout netRow = new LinearLayout(this);
+		netRow.setOrientation(LinearLayout.HORIZONTAL);
+		for (int i = 0; i < NET_MODES.length; i++) {
+			final String mode = NET_MODES[i];
+			TextView chip = chip(NET_LABELS[i]);
+			chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+			chip.setOnClickListener(v -> {
+				prefs.edit().putString(K_NET_MODE, mode).apply();
+				refreshNetwork();
+			});
+			netChips[i] = chip;
+			netRow.addView(chip, weighted(i == 0 ? 0 : dp(3), i == NET_MODES.length - 1 ? 0 : dp(3)));
+		}
+		net.addView(netRow);
+
+		// Host: shows the room code.
+		netHostPanel = new LinearLayout(this);
+		netHostPanel.setOrientation(LinearLayout.VERTICAL);
+		netHostPanel.setPadding(0, dp(16), 0, 0);
+		netHostPanel.addView(text("Código de tu sala", 13, C_MUTED, true));
+		hostCode = text("", 34, C_TEXT, true);
+		hostCode.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+		hostCode.setLetterSpacing(0.12f);
+		hostCode.setTextIsSelectable(true);
+		hostCode.setPadding(0, dp(4), 0, dp(4));
+		netHostPanel.addView(hostCode);
+		hostDetail = text("", 13, C_MUTED, false);
+		netHostPanel.addView(hostDetail);
+		TextView shareCode = outlineButton("Compartir código");
+		shareCode.setOnClickListener(v -> shareRoomCode());
+		LinearLayout.LayoutParams shareParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		shareParams.topMargin = dp(10);
+		netHostPanel.addView(shareCode, shareParams);
+		net.addView(netHostPanel);
+
+		// Guest: types the room code.
+		netJoinPanel = new LinearLayout(this);
+		netJoinPanel.setOrientation(LinearLayout.VERTICAL);
+		netJoinPanel.setPadding(0, dp(16), 0, 0);
+		netJoinPanel.addView(text("Código de la sala de tu amigo", 13, C_MUTED, true));
+		joinInput = input("XXXX-XXX", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 9);
+		joinInput.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+		joinInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+		joinInput.setLetterSpacing(0.1f);
+		joinInput.setFilters(new InputFilter[] { new InputFilter.AllCaps(), new InputFilter.LengthFilter(9) });
+		joinInput.setText(prefs.getString(K_JOIN_CODE, ""));
+		joinInput.addTextChangedListener(new SimpleWatcher(s -> {
+			prefs.edit().putString(K_JOIN_CODE, s).apply();
+			refreshJoinStatus();
+		}));
+		LinearLayout.LayoutParams joinParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		joinParams.topMargin = dp(6);
+		netJoinPanel.addView(joinInput, joinParams);
+		joinStatus = text("", 13, C_MUTED, false);
+		joinStatus.setPadding(0, dp(6), 0, 0);
+		netJoinPanel.addView(joinStatus);
+		net.addView(netJoinPanel);
+
+		// Internet (beta): public relay servers.
+		netInternetPanel = new LinearLayout(this);
+		netInternetPanel.setOrientation(LinearLayout.VERTICAL);
+		netInternetPanel.setPadding(0, dp(16), 0, 0);
+		netInternetPanel.addView(text("Servidor", 13, C_MUTED, true));
+		LinearLayout serverRow = new LinearLayout(this);
+		serverRow.setOrientation(LinearLayout.HORIZONTAL);
+		serverRow.setPadding(0, dp(8), 0, 0);
+		for (int i = 0; i < NET_SERVERS.length; i++) {
+			final String host = NET_SERVERS[i][0];
+			TextView chip = chip(NET_SERVERS[i][1] + "\n" + NET_SERVERS[i][2]);
+			chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+			chip.setOnClickListener(v -> {
+				prefs.edit().putString(K_NET_SERVER, host).apply();
+				refreshNetwork();
+			});
+			serverChips[i] = chip;
+			serverRow.addView(chip, weighted(i == 0 ? 0 : dp(3), i == NET_SERVERS.length - 1 ? 0 : dp(3)));
+		}
+		netInternetPanel.addView(serverRow);
+		net.addView(netInternetPanel);
+
+		netSteps = text("", 13, C_MUTED, false);
+		netSteps.setPadding(0, dp(14), 0, 0);
+		net.addView(netSteps);
+		TextView netNote = text("Mientras estén conectados no se pueden guardar ni cargar estados rápidos.", 12, 0xFF6C6C78, false);
+		netNote.setPadding(0, dp(8), 0, 0);
+		net.addView(netNote);
+
+		// Hitbox viewer research: send save states to find where the game keeps its boxes.
+		LinearLayout hitbox = section(col, "VISOR DE HITBOXES · EN PREPARACIÓN");
+		hitbox.addView(text("Para dibujar las cajas de golpe (hitboxes) y de daño (hurtboxes) necesito saber dónde las guarda tu copia del juego en memoria. Eso se descubre con estados guardados:", 13, C_MUTED, false));
+		TextView hitboxSteps = text(
+			"1. Juega en «Training» con Sol contra cualquier rival.\n"
+			+ "2. En cada momento, pulsa Atrás → elige otra ranura → «Guardar estado»:\n"
+			+ "   • Ranura 1: Sol quieto de pie.\n"
+			+ "   • Ranura 2: Sol agachado.\n"
+			+ "   • Ranura 3: Sol en el aire (saltando).\n"
+			+ "   • Ranura 4: Sol haciendo S de pie, con la espada extendida.\n"
+			+ "3. Sal del juego, pulsa «Enviar estados guardados» y mándalos al chat donde se hizo esta app.",
+			13, C_TEXT, false);
+		hitboxSteps.setPadding(0, dp(10), 0, dp(12));
+		hitbox.addView(hitboxSteps);
+		TextView sendStates = outlineButton("Enviar estados guardados");
+		sendStates.setOnClickListener(v -> shareSaveStates());
+		hitbox.addView(sendStates, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
 		// Graphics
 		LinearLayout graphics = section(col, "GRÁFICOS");
 		graphics.addView(text("Motor gráfico", 15, C_TEXT, true));
@@ -1280,6 +1654,48 @@ public class LauncherActivity extends Activity {
 		row.setOnClickListener(v -> sw.toggle());
 		parent.addView(row);
 		return sw;
+	}
+
+	private EditText input(String hint, int inputType, int maxLength) {
+		EditText e = new EditText(this);
+		e.setHint(hint);
+		e.setHintTextColor(0xFF5A5A66);
+		e.setTextColor(C_TEXT);
+		e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+		e.setInputType(inputType);
+		e.setSingleLine(true);
+		e.setFilters(new InputFilter[] { new InputFilter.LengthFilter(maxLength) });
+		e.setPadding(dp(14), dp(12), dp(14), dp(12));
+		GradientDrawable bg = new GradientDrawable();
+		bg.setColor(0xFF101015);
+		bg.setCornerRadius(dp(12));
+		bg.setStroke(dp(1.5f), C_CHIP_STROKE);
+		e.setBackground(bg);
+		return e;
+	}
+
+	/** TextWatcher that only cares about the final text. */
+	private static final class SimpleWatcher implements TextWatcher {
+		interface Listener {
+			void onText(String text);
+		}
+
+		private final Listener listener;
+
+		SimpleWatcher(Listener listener) {
+			this.listener = listener;
+		}
+
+		@Override
+		public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+		@Override
+		public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+		@Override
+		public void afterTextChanged(Editable s) {
+			listener.onText(s.toString());
+		}
 	}
 
 	private TextView text(String s, float sp, int color, boolean bold) {
