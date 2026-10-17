@@ -196,6 +196,9 @@ inline void Draw(UIContext *ctx, const DisplayLayoutConfig &config) {
 	const float kx = rc.w * g_display.dpi_scale_x / 480.0f;
 	const float ky = rc.h * g_display.dpi_scale_y / 272.0f;
 	DrawBuffer *draw = ctx->Draw();
+	// Plain colored shapes need the untextured mode (in the normal one, Rect samples the UI atlas).
+	ctx->Flush();
+	ctx->BeginNoTex();
 
 	// Colors are 0xAABBGGRR.
 	for (const AcHitbox::Box &b : s.boxes) {
@@ -232,6 +235,9 @@ inline void Draw(UIContext *ctx, const DisplayLayoutConfig &config) {
 			draw->Rect(x - 1.0f, y - r, 2.0f, r * 2, 0xFFFFFFFF);
 		}
 	}
+
+	ctx->Flush();
+	ctx->Begin();
 
 	std::string status = s.detector.Status();
 	if (!status.empty()) {

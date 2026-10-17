@@ -37,6 +37,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
@@ -101,6 +102,21 @@ public class LauncherActivity extends Activity {
 	private static final String[] FSR_SCALE_LABELS = { "1.5×", "2×", "3×" };
 	private static final int FSR_DEFAULT_SCALE = 20;
 	private static final int FSR_DEFAULT_SHARP = 85;
+	// Device test (DeviceBenchmark) and custom HUD (UI/AcPlusHud.h).
+	private static final String K_BENCH = "bench_result";
+	private static final String K_BENCH_ASKED = "bench_asked";
+	private static final String K_HUD_ON = "hud_enabled";
+	private static final String K_HUD_DESIGN = "hud_design";
+	private static final String K_HUD_ALPHA = "hud_opacity";
+	private static final String[] HUD_NAMES = { "Neón", "Arcade", "Lateral", "Datos" };
+	private static final int[] HUD_PREVIEWS = { R.drawable.hud_neon, R.drawable.hud_arcade, R.drawable.hud_side, R.drawable.hud_data };
+	private static final String[] HUD_DESCRIPTIONS = {
+		"Barras inclinadas con brillo: cian para el jugador 1 y rosa para el 2. Tensión con marcas cada 25 % y el combo en grande en el lado de quien lo hace.",
+		"Barras amarillas con el daño reciente en rojo, sobre franjas oscuras como una recreativa de los 90. Combo «12 HITS!» con el daño.",
+		"Barras verticales en las franjas negras de los lados de los teléfonos alargados: la imagen del juego queda despejada.",
+		"Para entrenar: vida exacta, tensión y burst en %, y los golpes y el daño de cada combo (el último se queda en pantalla).",
+	};
+	private static final int[] HUD_ALPHAS = { 60, 80, 100 };
 
 	private static final int[] GES_SCALES = { 80, 100, 125 };
 	private static final String[] GES_SCALE_LABELS = { "Pequeños", "Normales", "Grandes" };
@@ -267,6 +283,16 @@ public class LauncherActivity extends Activity {
 	private TextView fsrWarn;
 	private TextView fsrNote;
 	private final List<View> effectRows = new ArrayList<>();
+	private TextView benchSummary;
+	private TextView benchDetail;
+	private TextView benchApply;
+	private TextView benchRun;
+	private Switch hudSwitch;
+	private LinearLayout hudOptions;
+	private final TextView[] hudChips = new TextView[HUD_NAMES.length];
+	private final TextView[] hudAlphaChips = new TextView[HUD_ALPHAS.length];
+	private ImageView hudPreview;
+	private TextView hudDesc;
 	private final TextView[] netChips = new TextView[NET_MODES.length];
 	private EditText nickInput;
 	private LinearLayout netHostPanel;
@@ -299,6 +325,11 @@ public class LauncherActivity extends Activity {
 			prefs.edit().putString(K_BACKEND, defaultBackend()).apply();
 		}
 		setContentView(buildUi());
+		// First launch: test the phone once and suggest settings.
+		if (!prefs.contains(K_BENCH) && !prefs.getBoolean(K_BENCH_ASKED, false)) {
+			prefs.edit().putBoolean(K_BENCH_ASKED, true).apply();
+			handler.postDelayed(() -> runBenchmark(true), 800);
+		}
 	}
 
 	@Override
@@ -639,6 +670,10 @@ public class LauncherActivity extends Activity {
 			ini.append(HB_INI_KEYS[i]).append(" = ").append(prefs.getBoolean(HB_KEYS[i], true) ? "True" : "False").append('\n');
 		}
 		ini.append(hitboxManualLines(prefs.getString(K_HB_MANUAL, "")));
+		ini.append("[Hud]\n")
+			.append("Enabled = ").append(prefs.getBoolean(K_HUD_ON, false) ? "True" : "False").append('\n')
+			.append("Design = ").append(hudDesign()).append('\n')
+			.append("Opacity = ").append(prefs.getInt(K_HUD_ALPHA, 100)).append('\n');
 		ini.append("[Fsr]\n")
 			.append("Enabled = ").append(fsrOn() ? "True" : "False").append('\n')
 			.append("GameId = ").append(fsrGameKey().equals("default") ? "" : fsrGameKey()).append('\n')
@@ -893,6 +928,8 @@ public class LauncherActivity extends Activity {
 		refreshHitboxes();
 		refreshGestures();
 		refreshFsr();
+		refreshBenchmark();
+		refreshHud();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -1069,6 +1106,171 @@ public class LauncherActivity extends Activity {
 		s.append(custom == 0 ? "Todos usan el tipo de botones general." : custom + (custom == 1 ? " personaje tiene" : " personajes tienen") + " un tipo de botones propio.");
 		s.append(saved == 0 ? "" : "\n" + saved + (saved == 1 ? " personaje tiene" : " personajes tienen") + " una distribución guardada.");
 		profilesStatus.setText(s.toString());
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Custom HUD
+
+	private int hudDesign() {
+		int d = prefs.getInt(K_HUD_DESIGN, 1);
+		return d >= 1 && d <= HUD_NAMES.length ? d : 1;
+	}
+
+	private void refreshHud() {
+		boolean on = prefs.getBoolean(K_HUD_ON, false);
+		hudSwitch.setChecked(on);
+		hudOptions.setAlpha(on ? 1f : 0.45f);
+		int design = hudDesign();
+		for (int i = 0; i < HUD_NAMES.length; i++) {
+			styleChip(hudChips[i], i + 1 == design);
+		}
+		hudPreview.setImageResource(HUD_PREVIEWS[design - 1]);
+		hudPreview.setContentDescription("Vista previa del HUD " + HUD_NAMES[design - 1]);
+		String desc = HUD_DESCRIPTIONS[design - 1];
+		if (!isProfileGame()) {
+			desc = "⚠ Tu copia es " + prefs.getString(K_ID, "") + ": el HUD propio solo funciona con la versión americana (ULUS-10409).\n\n" + desc;
+		}
+		hudDesc.setText(desc);
+		int alpha = prefs.getInt(K_HUD_ALPHA, 100);
+		for (int i = 0; i < HUD_ALPHAS.length; i++) {
+			styleChip(hudAlphaChips[i], HUD_ALPHAS[i] == alpha);
+		}
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Device test
+
+	private void refreshBenchmark() {
+		DeviceBenchmark.Result r = DeviceBenchmark.Result.fromJson(prefs.getString(K_BENCH, null));
+		if (r == null) {
+			benchSummary.setText("Aún no has probado tu equipo");
+			benchDetail.setText("Una prueba de unos segundos mide tu GPU dibujando una escena tipo pelea de 1× a 8× y con los efectos de la app, y te sugiere la resolución, el motor gráfico y el efecto ideales.");
+			benchApply.setVisibility(View.GONE);
+			benchRun.setText("Probar mi equipo");
+			return;
+		}
+		benchSummary.setText("Gama " + r.tier.toLowerCase(Locale.ROOT) + " · " + recommendationShort(r));
+		benchDetail.setText(benchmarkReport(r));
+		benchApply.setVisibility(View.VISIBLE);
+		benchRun.setText("Repetir prueba");
+	}
+
+	private String recommendationShort(DeviceBenchmark.Result r) {
+		StringBuilder s = new StringBuilder();
+		s.append(r.recRes).append("×");
+		if (r.recFsr) {
+			s.append(" + FSR ").append(fsrScaleLabel(r.recFsrScale));
+		}
+		s.append(" · ").append(BACKEND_VULKAN.equals(r.recBackend) ? "Vulkan" : "OpenGL");
+		return s.toString();
+	}
+
+	private String benchmarkReport(DeviceBenchmark.Result r) {
+		StringBuilder s = new StringBuilder();
+		s.append("Recomendado: resolución ").append(r.recRes).append("× (").append(PSP_W * r.recRes).append(" × ").append(PSP_H * r.recRes).append(")");
+		if (r.recFsr) {
+			s.append(" con AMD FSR ").append(fsrScaleLabel(r.recFsrScale)).append(" para llegar a tu pantalla");
+		} else {
+			s.append(", sin filtro");
+		}
+		s.append(", motor ").append(BACKEND_VULKAN.equals(r.recBackend) ? "Vulkan" : "OpenGL").append(".\n\n");
+		s.append("GPU: ").append(r.gpu.isEmpty() ? "?" : r.gpu);
+		if (r.vulkanVersion > 0) {
+			s.append(" · Vulkan ").append(r.vulkanVersion >> 22).append('.').append((r.vulkanVersion >> 12) & 0x3FF);
+		}
+		s.append("\nCPU: ").append(r.cores).append(" núcleos");
+		if (r.maxFreqKHz > 0) {
+			s.append(String.format(Locale.ROOT, " hasta %.1f GHz", r.maxFreqKHz / 1e6));
+		}
+		if (r.ramMB > 0) {
+			s.append(String.format(Locale.ROOT, " · %.0f GB de RAM", r.ramMB / 1024.0));
+		}
+		s.append(String.format(Locale.ROOT, "\nPantalla: %d × %d (el juego ocupa %d × %d) · %.0f Hz", r.screenW, r.screenH, r.gameW, r.gameH, r.refresh));
+		s.append("\n\nDibujar el juego (ms por imagen; a 60 FPS hay 16,7 ms):\n");
+		for (int k = 1; k <= DeviceBenchmark.MAX_RES; k++) {
+			if (Float.isNaN(r.sceneMs[k])) {
+				continue;
+			}
+			s.append(k == 1 ? "" : " · ").append(k).append("× ").append(DeviceBenchmark.ms(r.sceneMs[k]));
+		}
+		s.append("\n\nEfectos en tu pantalla (con el juego incluido):");
+		for (int i = 0; i < DeviceBenchmark.EFFECT_IDS.length; i++) {
+			float total = r.effectTotal(i, r.recRes);
+			s.append("\n").append(DeviceBenchmark.EFFECT_NAMES[i]).append(": ").append(DeviceBenchmark.ms(total)).append(" ms  ").append(DeviceBenchmark.rating(total));
+		}
+		if (!r.error.isEmpty()) {
+			s.append("\n\nNo se pudo medir la GPU (").append(r.error).append("): la recomendación sale de tu pantalla y tu RAM.");
+		}
+		s.append("\n\nEs una estimación con una escena de prueba, no con el juego: si algo va lento, baja un nivel.");
+		return s.toString();
+	}
+
+	private void applyBenchmark(DeviceBenchmark.Result r) {
+		SharedPreferences.Editor e = prefs.edit()
+			.putInt(K_RES, clampRes(r.recRes))
+			.putString(K_BACKEND, r.recBackend)
+			.putString(K_EFFECT, "none")
+			.putBoolean(K_FSR_ON + fsrGameKey(), r.recFsr);
+		if (r.recFsr) {
+			e.putInt(K_FSR_SCALE + fsrGameKey(), r.recFsrScale);
+		}
+		e.apply();
+		refreshAll();
+		showMessage("Ajustes aplicados", "Resolución " + r.recRes + "×" + (r.recFsr ? " con AMD FSR " + fsrScaleLabel(r.recFsrScale) : " sin filtro")
+			+ " y motor " + (BACKEND_VULKAN.equals(r.recBackend) ? "Vulkan" : "OpenGL") + ". Puedes cambiarlos cuando quieras.");
+	}
+
+	private void runBenchmark(boolean firstRun) {
+		if (isFinishing()) {
+			return;
+		}
+		final DeviceBenchmark bench = new DeviceBenchmark();
+		LinearLayout box = new LinearLayout(this);
+		box.setOrientation(LinearLayout.VERTICAL);
+		box.setPadding(dp(24), dp(12), dp(24), dp(4));
+		TextView intro = text(firstRun
+			? "Es la primera vez que abres la app: pruebo tu equipo unos segundos para sugerirte los mejores ajustes."
+			: "Midiendo tu equipo…", 14, C_TEXT, false);
+		box.addView(intro);
+		final ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+		bar.setMax(100);
+		if (Build.VERSION.SDK_INT >= 21) {
+			bar.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
+		}
+		LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		barParams.topMargin = dp(14);
+		box.addView(bar, barParams);
+		final TextView step = text("Preparando…", 13, C_MUTED, false);
+		step.setPadding(0, dp(6), 0, 0);
+		box.addView(step);
+		final AlertDialog dialog = new AlertDialog.Builder(this)
+			.setTitle("Probando tu equipo")
+			.setView(box)
+			.setCancelable(false)
+			.setNegativeButton("Cancelar", (d, w) -> bench.cancel())
+			.show();
+		new Thread(() -> {
+			DeviceBenchmark.Result r = bench.run(this, (text, percent) -> handler.post(() -> {
+				step.setText(text);
+				bar.setProgress(percent);
+			}));
+			handler.post(() -> {
+				if (dialog.isShowing()) {
+					dialog.dismiss();
+				}
+				if (bench.isCancelled() || isFinishing()) {
+					return;
+				}
+				prefs.edit().putString(K_BENCH, r.toJson()).apply();
+				refreshBenchmark();
+				new AlertDialog.Builder(this)
+					.setTitle("Tu equipo: gama " + r.tier.toLowerCase(Locale.ROOT))
+					.setMessage(benchmarkReport(r))
+					.setPositiveButton("Aplicar recomendados", (d, w) -> applyBenchmark(r))
+					.setNegativeButton("Ahora no", null)
+					.show();
+			});
+		}, "DeviceBenchmark").start();
 	}
 
 	// -------------------------------------------------------------------------------------------
@@ -1804,6 +2006,28 @@ public class LauncherActivity extends Activity {
 		pick.setOnClickListener(v -> pickGame());
 		game.addView(pick, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+		// Device test (DeviceBenchmark)
+		LinearLayout bench = section(col, "TU EQUIPO");
+		benchSummary = text("", 17, C_TEXT, true);
+		bench.addView(benchSummary);
+		benchDetail = text("", 13, C_MUTED, false);
+		benchDetail.setPadding(0, dp(6), 0, dp(12));
+		bench.addView(benchDetail);
+		LinearLayout benchButtons = new LinearLayout(this);
+		benchButtons.setOrientation(LinearLayout.HORIZONTAL);
+		benchApply = filledButton("Aplicar recomendados", 15);
+		benchApply.setOnClickListener(v -> {
+			DeviceBenchmark.Result r = DeviceBenchmark.Result.fromJson(prefs.getString(K_BENCH, null));
+			if (r != null) {
+				applyBenchmark(r);
+			}
+		});
+		benchRun = outlineButton("Probar mi equipo");
+		benchRun.setOnClickListener(v -> runBenchmark(false));
+		benchButtons.addView(benchApply, weighted(0, dp(4)));
+		benchButtons.addView(benchRun, weighted(dp(4), 0));
+		bench.addView(benchButtons);
+
 		// Resolution
 		LinearLayout resolution = section(col, "RESOLUCIÓN DE RENDERIZADO");
 		for (int row = 0; row < 2; row++) {
@@ -2221,6 +2445,68 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		manualParams.topMargin = dp(12);
 		hitboxOptions.addView(hitboxManual, manualParams);
+
+		// Custom HUD (UI/AcPlusHud.h)
+		LinearLayout hud = section(col, "HUD PROPIO");
+		hudSwitch = switchRow(hud, "Mostrar mi HUD",
+			"Barras de vida, tensión y burst, y contador de combos con su daño, leídos de la memoria del juego y dibujados encima. Versión americana (ULUS-10409).");
+		hudSwitch.setOnCheckedChangeListener((b, checked) -> {
+			prefs.edit().putBoolean(K_HUD_ON, checked).apply();
+			refreshHud();
+		});
+		hudOptions = new LinearLayout(this);
+		hudOptions.setOrientation(LinearLayout.VERTICAL);
+		hudOptions.setPadding(0, dp(14), 0, 0);
+		hud.addView(hudOptions);
+		hudOptions.addView(text("Diseño", 15, C_TEXT, true));
+		LinearLayout hudRow = new LinearLayout(this);
+		hudRow.setOrientation(LinearLayout.HORIZONTAL);
+		hudRow.setPadding(0, dp(10), 0, dp(10));
+		for (int i = 0; i < HUD_NAMES.length; i++) {
+			final int design = i + 1;
+			hudChips[i] = chip(HUD_NAMES[i]);
+			hudChips[i].setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+			hudChips[i].setOnClickListener(v -> {
+				prefs.edit().putInt(K_HUD_DESIGN, design).apply();
+				refreshHud();
+			});
+			hudRow.addView(hudChips[i], weighted(i == 0 ? 0 : dp(4), i == HUD_NAMES.length - 1 ? 0 : dp(4)));
+		}
+		hudOptions.addView(hudRow);
+		hudPreview = new ImageView(this);
+		hudPreview.setAdjustViewBounds(true);
+		hudPreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+		GradientDrawable hudBg = new GradientDrawable();
+		hudBg.setColor(Color.BLACK);
+		hudBg.setCornerRadius(dp(10));
+		hudPreview.setBackground(hudBg);
+		hudPreview.setClipToOutline(true);
+		hudOptions.addView(hudPreview, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		TextView hudPreviewNote = text("Vista previa en un teléfono alargado, con una imagen de ejemplo (no es del juego).", 11, 0xFF6C6C78, false);
+		hudPreviewNote.setPadding(0, dp(4), 0, 0);
+		hudOptions.addView(hudPreviewNote);
+		hudDesc = text("", 13, C_MUTED, false);
+		hudDesc.setPadding(0, dp(8), 0, 0);
+		hudOptions.addView(hudDesc);
+		TextView hudAlphaLabel = text("Visibilidad", 15, C_TEXT, true);
+		hudAlphaLabel.setPadding(0, dp(14), 0, 0);
+		hudOptions.addView(hudAlphaLabel);
+		LinearLayout hudAlphaRow = new LinearLayout(this);
+		hudAlphaRow.setOrientation(LinearLayout.HORIZONTAL);
+		hudAlphaRow.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < HUD_ALPHAS.length; i++) {
+			final int value = HUD_ALPHAS[i];
+			hudAlphaChips[i] = chip(value + " %");
+			hudAlphaChips[i].setOnClickListener(v -> {
+				prefs.edit().putInt(K_HUD_ALPHA, value).apply();
+				refreshHud();
+			});
+			hudAlphaRow.addView(hudAlphaChips[i], weighted(i == 0 ? 0 : dp(4), i == HUD_ALPHAS.length - 1 ? 0 : dp(4)));
+		}
+		hudOptions.addView(hudAlphaRow);
+		TextView hudNote = text("Aparece en los combates y se esconde en los menús. Va encima del HUD del juego: «Neón» y «Arcade» lo tapan con franjas oscuras, «Lateral» y «Datos» lo dejan a la vista.", 13, C_MUTED, false);
+		hudNote.setPadding(0, dp(12), 0, 0);
+		hudOptions.addView(hudNote);
 
 		// Graphics
 		LinearLayout graphics = section(col, "GRÁFICOS");

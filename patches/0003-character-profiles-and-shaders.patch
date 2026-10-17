@@ -89,10 +89,10 @@ index 87f9f4d..6208e33 100644
  	void UpdateAfterSettingAutoFrameSkip();
  	void NotifyUpdatedCpuCore();
 diff --git a/UI/EmuScreen.cpp b/UI/EmuScreen.cpp
-index b294842..e816b29 100644
+index b294842..8b1ae83 100644
 --- a/UI/EmuScreen.cpp
 +++ b/UI/EmuScreen.cpp
-@@ -83,6 +83,10 @@ using namespace std::placeholders;
+@@ -83,6 +83,11 @@ using namespace std::placeholders;
  #include "UI/MainScreen.h"
  #include "UI/Background.h"
  #include "UI/EmuScreen.h"
@@ -100,10 +100,11 @@ index b294842..e816b29 100644
 +#include "UI/AcPlusHitboxes.h"
 +#include "UI/AcPlusGestures.h"
 +#include "UI/AcPlusFsr.h"
++#include "UI/AcPlusHud.h"
  #include "UI/DevScreens.h"
  #include "UI/GameInfoCache.h"
  #include "UI/BaseScreens.h"
-@@ -450,6 +454,9 @@ void EmuScreen::bootComplete() {
+@@ -450,6 +455,9 @@ void EmuScreen::bootComplete() {
  
  EmuScreen::~EmuScreen() {
  	g_controlMapper.RemoveListener(this);
@@ -113,7 +114,7 @@ index b294842..e816b29 100644
  
  	if (imguiInited_) {
  		ImGui_ImplThin3d_Shutdown();
-@@ -514,6 +521,11 @@ void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
+@@ -514,6 +522,11 @@ void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
  		return;
  	}
  
@@ -125,7 +126,7 @@ index b294842..e816b29 100644
  	// Returning to the PauseScreen, unless we're stepping, means we should go back to controls.
  	UI::EnableFocusMovement(false);
  
-@@ -1268,7 +1280,15 @@ void EmuScreen::CreateViews() {
+@@ -1268,7 +1281,15 @@ void EmuScreen::CreateViews() {
  
  	InitPadLayout(&touch, deviceOrientation, bounds.w, bounds.h);
  
@@ -142,7 +143,7 @@ index b294842..e816b29 100644
  	if (g_Config.bShowDeveloperMenu) {
  		root_->Add(new Button(dev->T("DevMenu")))->OnClick.Handle(this, &EmuScreen::OnDevTools);
  	}
-@@ -1492,6 +1512,19 @@ void EmuScreen::update() {
+@@ -1492,6 +1513,21 @@ void EmuScreen::update() {
  	if (!PSP_IsInited())
  		return;
  
@@ -157,18 +158,21 @@ index b294842..e816b29 100644
 +		AcPlusGestures::Update();
 +		// Launcher build: AMD FSR 1.0 settings saved for this game.
 +		AcPlusFsr::ApplyOnce();
++		// Launcher build: custom HUD (health, tension, burst, combos).
++		AcPlusHud::Update();
 +	}
 +
  	double now = time_now_d();
  
  	DisplayLayoutConfig &config = g_Config.GetDisplayLayoutConfig(GetDeviceOrientation());
-@@ -1974,6 +2007,11 @@ void EmuScreen::renderUI() {
+@@ -1974,6 +2010,12 @@ void EmuScreen::renderUI() {
  	// This sets up some important states but not the viewport.
  	ctx->Begin();
  
 +	// Launcher build: hitboxes go over the game picture but under the touch controls.
 +	if (PSP_IsInited() && !bootPending_) {
 +		AcPlusHitboxes::Draw(ctx, g_Config.GetDisplayLayoutConfig(GetDeviceOrientation()));
++		AcPlusHud::Draw(ctx, g_Config.GetDisplayLayoutConfig(GetDeviceOrientation()));
 +	}
 +
  	if (root_) {
