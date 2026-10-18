@@ -38,6 +38,7 @@
 #include "Core/ELF/ParamSFO.h"
 #include "Core/HLE/sceCtrl.h"
 #include "UI/AcPlusGestureCore.h"
+#include "UI/AcPlusGameData.h"
 #include "UI/AcPlusHitboxes.h"
 #include "UI/AcPlusProfiles.h"
 
@@ -232,7 +233,7 @@ inline void Update() {
 				s.candidateReads = 1;
 			} else if (++s.candidateReads >= 3 && id != s.character) {
 				ApplyMoves(id);
-				g_OSD.Show(OSDType::MESSAGE_INFO, "Especiales: " + AcPlusProfiles::CharacterName(id), 1.5f, "acplus_gestures");
+				g_OSD.Show(OSDType::MESSAGE_INFO, "Especiales: " + std::string(AcGame::GG::kNames[id]), 1.5f, "acplus_gestures");
 			}
 		}
 	}

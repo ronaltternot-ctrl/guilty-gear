@@ -1,14 +1,9 @@
 // GGXX AC+ launcher build: a custom HUD drawn over the game, from values read in its memory.
 //
-// What is read (US version ULUS-10409; addresses from the CWCheat codes for that disc, base
-// 0x08800000, and the layout they share with the PS2 version):
-//   health   u16  fighter object + 0x1E      P1 0x0913D01E, P2 = + 0x124        (max 420)
-//   tension  u16  player block               P1 0x08C6BB7C, P2 = + 0x148        (max 10000)
-//   burst    u16  player block + 0xF8                                            (max 15000)
-//   combo    u16  player block + 0x100: hits the OTHER player is landing ("Max Beat" code:
-//                 P1's combo at P2 block + 0x100 = 0x08C6BDC4)
-//   timer    u16  0x08C6CC14, in frames (6000 = full)
-//   fighters u8   0x08C6BB58 / 0x08C6BB5A (character select)
+// The values come from AcPlusGameData.h (one reader per game: Guilty Gear XX AC+, BlazBlue and
+// The King of Fighters) as a Snapshot: health and its maximum, the power meter, an optional
+// second gauge (Burst), the timer, the combo counter when the game has one, and the names.
+// Games whose combo counter is not known get it estimated from the health drops.
 //
 // This file has no PPSSPP headers: it reads through an interface and outputs simple primitives
 // (rectangles, gradients, quads, text), so it can be tested and its designs previewed on a PC
@@ -36,27 +31,6 @@ struct Mem {
 	virtual const u8 *Ptr(u32 addr) const = 0;
 };
 
-const u32 kP1Object = 0x0913D000;
-const u32 kObjectStride = 0x124;
-const u32 kObjectHealth = 0x1E;
-const u32 kP1Block = 0x08C6BB7C;
-const u32 kBlockStride = 0x148;
-const u32 kBlockBurst = 0xF8;
-const u32 kBlockCombo = 0x100;
-const u32 kTimer = 0x08C6CC14;
-const u32 kSelect[2] = { 0x08C6BB58, 0x08C6BB5A };
-
-const int kMaxHealth = 420;
-const int kMaxTension = 10000;
-const int kMaxBurst = 15000;
-const int kTimerFrames = 6000;
-
-static const char *const kNames[] = {
-	"", "SOL", "KY", "MAY", "MILLIA", "AXL", "POTEMKIN", "CHIPP", "EDDIE", "BAIKEN", "FAUST",
-	"TESTAMENT", "JAM", "ANJI", "JOHNNY", "VENOM", "DIZZY", "SLAYER", "I-NO", "ZAPPA",
-	"BRIDGET", "ROBO-KY", "A.B.A", "ORDER-SOL", "KLIFF", "JUSTICE",
-};
-
 inline bool Read16(const Mem &m, u32 addr, int *out) {
 	if (!m.Valid(addr, 2))
 		return false;
@@ -73,71 +47,85 @@ inline bool Read8(const Mem &m, u32 addr, int *out) {
 	return true;
 }
 
+inline bool Read32(const Mem &m, u32 addr, u32 *out) {
+	if (!m.Valid(addr, 4))
+		return false;
+	memcpy(out, m.Ptr(addr), 4);
+	return true;
+}
+
+// FNV-1a over a memory range (fighter objects change every frame while a fight runs).
+inline u32 Hash(const Mem &m, u32 addr, u32 size, u32 h = 2166136261u) {
+	if (!m.Valid(addr, size))
+		return h;
+	const u8 *p = m.Ptr(addr);
+	for (u32 i = 0; i < size; i++)
+		h = (h ^ p[i]) * 16777619u;
+	return h;
+}
+
+// What the game calls its gauges.
+struct Style {
+	const char *meter = "TENSION";      // power meter, on the bars
+	const char *meterWord = "Tensión";  // the same in the "Datos" design
+	const char *gauge = "BURST";        // second gauge; nullptr when the game has none
+	const char *gaugeWord = "Burst";
+	bool timer = true;                  // the timer is read
+};
+
+inline const Style &DefaultStyle() {
+	static const Style style;
+	return style;
+}
+
+const int kTimerUnknown = -2;   // timer read but out of range: shown as "--"
+
 struct Snapshot {
 	bool valid = false;
 	int health[2] = {};
-	int tension[2] = {};
-	int burst[2] = {};
-	int combo[2] = {};      // hits each player is landing right now
-	int timer = 0;          // frames
-	int character[2] = {};
-	u32 objectsHash = 0;    // changes every frame while a fight runs
+	int healthMax[2] = { 1, 1 };
+	float meter[2] = {};                // 0..1
+	int stocks[2] = { -1, -1 };         // stored power stocks; -1 when the game has none
+	float gauge[2] = { -1.0f, -1.0f };  // second gauge 0..1; -1 when the game has none
+	int combo[2] = { -1, -1 };          // hits each player is landing; -1: estimated here
+	int timer = -1;                     // seconds; -1 none; kTimerUnknown
+	std::string name[2];
+	u32 objectsHash = 0;                // changes every frame while a fight runs
+	const Style *style = nullptr;
 };
-
-// Reads the values; valid = all of them in range (a fight is loaded).
-inline Snapshot Read(const Mem &m) {
-	Snapshot s;
-	bool ok = true;
-	for (int p = 0; p < 2; p++) {
-		const u32 block = kP1Block + (u32)p * kBlockStride;
-		const u32 other = kP1Block + (u32)(1 - p) * kBlockStride;
-		ok &= Read16(m, kP1Object + (u32)p * kObjectStride + kObjectHealth, &s.health[p]);
-		ok &= Read16(m, block, &s.tension[p]);
-		ok &= Read16(m, block + kBlockBurst, &s.burst[p]);
-		ok &= Read16(m, other + kBlockCombo, &s.combo[p]);
-		ok &= Read8(m, kSelect[p], &s.character[p]);
-		int id = 0;
-		ok &= Read16(m, kP1Object + (u32)p * kObjectStride, &id);
-		ok &= id >= 1 && id <= 26;
-		ok &= s.health[p] <= kMaxHealth && s.tension[p] <= kMaxTension && s.burst[p] <= kMaxBurst && s.combo[p] <= 999;
-		ok &= s.character[p] >= 1 && s.character[p] <= 25;
-	}
-	ok &= Read16(m, kTimer, &s.timer);
-	if (ok && m.Valid(kP1Object, kObjectStride * 2)) {
-		// FNV-1a over both fighter objects: in menus they stop changing.
-		u32 h = 2166136261u;
-		const u8 *p = m.Ptr(kP1Object);
-		for (u32 i = 0; i < kObjectStride * 2; i++)
-			h = (h ^ p[i]) * 16777619u;
-		s.objectsHash = h;
-	}
-	s.valid = ok;
-	return s;
-}
 
 // ---------------------------------------------------------------------------------------------
 // Values smoothed over time for drawing.
 
+// Estimated combos: hits closer than this (seconds) belong to the same combo.
+const double kHitWindow = 0.8;
+
 struct PlayerView {
-	float health = kMaxHealth;    // shown health
-	float trail = kMaxHealth;     // recent damage, drains after a moment
+	float health = 1;             // shown health
+	float healthMax = 1;
+	float trail = 1;              // recent damage, drains after a moment
 	double trailHold = 0;
-	float tension = 0, burst = 0;
+	float meter = 0;              // 0..1
+	int stocks = -1;
+	float gauge = -1;             // 0..1, -1 none
 	int comboHits = 0;            // combo shown (current or the one that just ended)
 	int comboDamage = 0;
 	double comboChanged = -10;    // when the hit count last went up
 	double comboEnded = -10;      // when it went back to 0 (-10 = still running / none)
 	bool comboShown = false;
+	bool estimated = false;       // hits counted from health drops
+	double lastHit = -10;         // estimated combos: last health drop caused
 	int lastComboHits = 0, lastComboDamage = 0;   // for the "Datos" design
-	int character = 0;
+	std::string name;
 };
 
 class Tracker {
 public:
 	PlayerView p[2];
-	int timer = 0;
+	int timer = -1;
 	float visible = 0;   // 0..1 fade
 	double now = 0;
+	const Style *style = &DefaultStyle();
 
 	void Update(const Snapshot &s, double t) {
 		const double dt = std::min(0.1, std::max(0.0, t - now));
@@ -155,12 +143,15 @@ public:
 		if (!s.valid)
 			return;
 
+		if (s.style)
+			style = s.style;
 		timer = s.timer;
 		const float prevHealth[2] = { p[0].health, p[1].health };
 		for (int i = 0; i < 2; i++) {
 			PlayerView &v = p[i];
-			v.character = s.character[i];
-			const float hp = (float)s.health[i];
+			v.name = s.name[i];
+			v.healthMax = (float)std::max(1, s.healthMax[i]);
+			const float hp = (float)std::min(s.health[i], s.healthMax[i]);
 			if (!started_ || hp > v.health + 0.5f) {
 				v.trail = hp;   // new round, or healed
 			} else if (hp < v.health - 0.5f) {
@@ -169,33 +160,64 @@ public:
 			}
 			v.health = hp;
 			if (t > v.trailHold && v.trail > v.health)
-				v.trail = std::max(v.health, v.trail - (float)(dt * 260.0));
-			v.tension = (float)s.tension[i];
-			v.burst = (float)s.burst[i];
+				v.trail = std::max(v.health, v.trail - (float)(dt * v.healthMax * 0.62));
+			v.meter = std::max(0.0f, std::min(1.0f, s.meter[i]));
+			v.stocks = s.stocks[i];
+			v.gauge = s.gauge[i] < 0 ? -1.0f : std::min(1.0f, s.gauge[i]);
 		}
 		if (!started_) {
 			healthBefore_[0] = s.health[0];
 			healthBefore_[1] = s.health[1];
 		}
 
-		// Combos: player i hitting player j. The game's counter goes back to 0 when a combo
-		// ends; if it ever kept its value instead, the combo counts as over after 2.5 s.
+		// Combos: player i hitting player j.
 		for (int i = 0; i < 2; i++) {
 			PlayerView &v = p[i];
 			const int j = 1 - i;
-			const int hits = s.combo[i];
-			if (hits == 0) {
-				healthBefore_[j] = s.health[j];
-				if (v.comboHits > 0 && v.comboEnded < 0)
+			int gameHits = 0;
+			if (s.combo[i] >= 0) {
+				// The game's counter goes back to 0 when a combo ends; if it ever kept its
+				// value instead, the combo counts as over after 2.5 s.
+				v.estimated = false;
+				const int hits = gameHits = s.combo[i];
+				if (hits == 0) {
+					healthBefore_[j] = s.health[j];
+					if (v.comboHits > 0 && v.comboEnded < 0)
+						v.comboEnded = t;
+				} else if (hits != v.comboHits || v.comboHits == 0) {
+					if (v.comboHits > 0 && hits < v.comboHits)
+						healthBefore_[j] = (int)prevHealth[j];   // restarted without passing through 0
+					v.comboChanged = t;
+					v.comboEnded = -1;
+					v.comboHits = hits;
+				} else if (v.comboEnded < 0 && t - v.comboChanged > 2.5) {
 					v.comboEnded = t;
-			} else if (hits != v.comboHits || v.comboHits == 0) {
-				if (v.comboHits > 0 && hits < v.comboHits)
-					healthBefore_[j] = (int)prevHealth[j];   // restarted without passing through 0
-				v.comboChanged = t;
-				v.comboEnded = -1;
-				v.comboHits = hits;
-			} else if (v.comboEnded < 0 && t - v.comboChanged > 2.5) {
-				v.comboEnded = t;
+				}
+			} else {
+				// No counter in memory: every health drop of the other player is a hit, and
+				// hits close together make a combo.
+				v.estimated = true;
+				if (started_ && s.health[j] < prevHealth[j] - 0.5f) {
+					if (v.comboHits > 0 && v.comboEnded < 0 && t - v.lastHit <= kHitWindow) {
+						v.comboHits++;
+					} else {
+						v.comboHits = 1;
+						healthBefore_[j] = (int)prevHealth[j];
+					}
+					v.lastHit = t;
+					v.comboChanged = t;
+					v.comboEnded = -1;
+				} else if (v.comboHits > 0 && v.comboEnded < 0 && t - v.lastHit > kHitWindow) {
+					v.comboEnded = t;
+				}
+				if (!started_ || s.health[j] > prevHealth[j] + 0.5f) {
+					// New round (or healed): whatever was running is over.
+					healthBefore_[j] = s.health[j];
+					if (started_ && v.comboEnded < 0 && v.comboHits > 0) {
+						v.comboHits = 0;
+						v.comboEnded = -10;
+					}
+				}
 			}
 			if (v.comboEnded < 0 && v.comboHits > 0) {
 				v.comboDamage = std::max(0, healthBefore_[j] - s.health[j]);
@@ -204,7 +226,7 @@ public:
 					v.lastComboDamage = v.comboDamage;
 				}
 			}
-			if (v.comboEnded >= 0 && t - v.comboEnded > 1.3 && hits == 0)
+			if (v.comboEnded >= 0 && t - v.comboEnded > 1.3 && gameHits == 0)
 				v.comboHits = 0;
 			v.comboShown = v.comboHits >= 2 && (v.comboEnded < 0 || t - v.comboEnded <= 1.3);
 		}
@@ -215,7 +237,7 @@ private:
 	u32 lastHash_ = 0;
 	double lastChange_ = -100;
 	bool started_ = false;
-	int healthBefore_[2] = { kMaxHealth, kMaxHealth };   // each player's health before the combo against them
+	int healthBefore_[2] = { 0, 0 };   // each player's health before the combo against them
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -312,8 +334,8 @@ private:
 	float opacity_;
 };
 
-inline std::string Name(int id) {
-	return id >= 1 && id <= 25 ? kNames[id] : "?";
+inline std::string Name(const PlayerView &v, int player) {
+	return v.name.empty() ? (player == 0 ? "1P" : "2P") : v.name;
 }
 
 inline std::string Num(int v) {
@@ -328,12 +350,23 @@ inline std::string Pct(float v, float max) {
 	return buf;
 }
 
-inline std::string TimerText(int frames) {
-	if (frames <= 0)
-		return "0";
-	if (frames > kTimerFrames + 60)
+inline std::string Pct(float fraction) {
+	return Pct(fraction, 1.0f);
+}
+
+// "TENSION 52%", "POWER 40% ×2".
+inline std::string MeterText(const Style &st, const PlayerView &v, bool withLabel = true) {
+	std::string out = withLabel ? std::string(st.meter) + " " : std::string();
+	out += Pct(v.meter);
+	if (v.stocks >= 0)
+		out += " ×" + Num(v.stocks);
+	return out;
+}
+
+inline std::string TimerText(int seconds) {
+	if (seconds < 0)
 		return "--";
-	return Num(std::min(99, (frames + 59) / 60));
+	return Num(std::min(99, seconds));
 }
 
 // "Pop" when the hit count goes up.
@@ -366,7 +399,7 @@ inline void DrawNeon(Painter &d, const Tracker &tr, const Frame &f) {
 	for (int i = 0; i < 2; i++) {
 		const PlayerView &v = tr.p[i];
 		const float len = f.gw * 0.5f - outer - inner;
-		const float hp = v.health / kMaxHealth, trail = v.trail / kMaxHealth;
+		const float hp = v.health / v.healthMax, trail = v.trail / v.healthMax;
 		const bool low = hp < 0.3f;
 		const float pulse = low ? 0.5f + 0.5f * (float)std::sin(tr.now * 9.0) : 0.0f;
 		u32 top = low ? Mix(0xFFFFC23E, 0xFFFF4D4D, pulse) : Mix(side[i], 0xFFFFFFFF, 0.25f);
@@ -384,17 +417,19 @@ inline void DrawNeon(Painter &d, const Tracker &tr, const Frame &f) {
 		span(0, hp, top, bottom, 0);
 		// Name and burst under the bar.
 		const float nameX = i == 0 ? f.gx + outer + 2 * u : f.gx + f.gw - outer - 2 * u;
-		d.Text(Name(v.character), nameX, barY + barH + 8 * u, 9.5f * u, side[i], i == 0 ? ALIGN_L : ALIGN_R);
-		const float bw = 42 * u, bx = i == 0 ? nameX + 56 * u : nameX - 56 * u - bw;
-		const float burst = v.burst / kMaxBurst;
-		d.Rect(bx, barY + barH + 7 * u, bw, 3 * u, 0xFF1A2236);
-		d.Rect(i == 0 ? bx : bx + bw * (1 - burst), barY + barH + 7 * u, bw * burst, 3 * u, burst >= 1.0f ? 0xFFFFFFFF : Alpha(side[i], 0.8f));
-		d.Text("BURST", i == 0 ? bx + bw + 3 * u : bx - 3 * u, barY + barH + 8.5f * u, 6 * u, burst >= 1.0f ? 0xFFFFFFFF : 0xFF7A86A8, i == 0 ? ALIGN_L : ALIGN_R);
+		d.Text(Name(v, i), nameX, barY + barH + 8 * u, 9.5f * u, side[i], i == 0 ? ALIGN_L : ALIGN_R);
+		if (v.gauge >= 0 && tr.style->gauge) {
+			const float bw = 42 * u, bx = i == 0 ? nameX + 56 * u : nameX - 56 * u - bw;
+			const float burst = v.gauge;
+			d.Rect(bx, barY + barH + 7 * u, bw, 3 * u, 0xFF1A2236);
+			d.Rect(i == 0 ? bx : bx + bw * (1 - burst), barY + barH + 7 * u, bw * burst, 3 * u, burst >= 1.0f ? 0xFFFFFFFF : Alpha(side[i], 0.8f));
+			d.Text(tr.style->gauge, i == 0 ? bx + bw + 3 * u : bx - 3 * u, barY + barH + 8.5f * u, 6 * u, burst >= 1.0f ? 0xFFFFFFFF : 0xFF7A86A8, i == 0 ? ALIGN_L : ALIGN_R);
+		}
 
 		// Tension at the bottom, with marks every 25%.
 		const float tw = 128 * u, th = 6 * u, ty = f.gy + f.gh - 13 * u;
 		const float tx = i == 0 ? f.gx + outer + 4 * u : f.gx + f.gw - outer - 4 * u - tw;
-		const float ten = v.tension / kMaxTension;
+		const float ten = v.meter;
 		const float ts = i == 0 ? skew * 0.6f : -skew * 0.6f;
 		d.Slant(tx - u, tx + tw + u, ty - u, th + 2 * u, ts, Alpha(side[i], 0.3f), Alpha(side[i], 0.1f));
 		d.Slant(tx, tx + tw, ty, th, ts, 0xE6070B18, 0xE6070B18);
@@ -405,7 +440,7 @@ inline void DrawNeon(Painter &d, const Tracker &tr, const Frame &f) {
 			d.Slant(tx + tw * (1 - ten), tx + tw, ty, th, ts, tc, Mix(tc, 0xFF000000, 0.35f));
 		for (int k = 1; k < 4; k++)
 			d.Rect(tx + tw * k / 4.0f - 0.5f * u, ty, u, th, k == 2 ? 0xCCFFFFFF : 0x66FFFFFF);
-		d.Text("TENSION " + Pct(v.tension, kMaxTension), i == 0 ? tx : tx + tw, ty - 5 * u, 6.5f * u, tc, i == 0 ? ALIGN_L : ALIGN_R);
+		d.Text(MeterText(*tr.style, v), i == 0 ? tx : tx + tw, ty - 5 * u, 6.5f * u, tc, i == 0 ? ALIGN_L : ALIGN_R);
 
 		// Combo, on the attacker's side.
 		if (v.comboShown) {
@@ -418,10 +453,12 @@ inline void DrawNeon(Painter &d, const Tracker &tr, const Frame &f) {
 		}
 	}
 	// Timer.
-	d.Slant(cx - 14 * u, cx + 14 * u, f.gy + 4 * u, 18 * u, 0, 0xE6070B18, 0xE6070B18);
-	d.Rect(cx - 14 * u, f.gy + 4 * u, 28 * u, u, 0xFF22E5FF);
-	d.Rect(cx - 14 * u, f.gy + 21 * u, 28 * u, u, 0xFFFF3EA5);
-	d.Text(TimerText(tr.timer), cx, f.gy + 13 * u, 13 * u, 0xFFFFFFFF, ALIGN_C);
+	if (tr.style->timer) {
+		d.Slant(cx - 14 * u, cx + 14 * u, f.gy + 4 * u, 18 * u, 0, 0xE6070B18, 0xE6070B18);
+		d.Rect(cx - 14 * u, f.gy + 4 * u, 28 * u, u, 0xFF22E5FF);
+		d.Rect(cx - 14 * u, f.gy + 21 * u, 28 * u, u, 0xFFFF3EA5);
+		d.Text(TimerText(tr.timer), cx, f.gy + 13 * u, 13 * u, 0xFFFFFFFF, ALIGN_C);
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -440,7 +477,7 @@ inline void DrawArcade(Painter &d, const Tracker &tr, const Frame &f) {
 		const PlayerView &v = tr.p[i];
 		const float bw = f.gw * 0.5f - 30 * u, bh = 13 * u, by = f.gy + 6 * u;
 		const float bx = i == 0 ? f.gx + 8 * u : cx + 22 * u;
-		const float hp = v.health / kMaxHealth, trail = v.trail / kMaxHealth;
+		const float hp = v.health / v.healthMax, trail = v.trail / v.healthMax;
 		d.Rect(bx - u, by - u, bw + 2 * u, bh + 2 * u, gold);
 		d.Rect(bx, by, bw, bh, 0xFF2A0A0A);
 		// Bars recede toward the outer edge.
@@ -455,25 +492,27 @@ inline void DrawArcade(Painter &d, const Tracker &tr, const Frame &f) {
 		d.Rect(i == 0 ? bx : bx + bw * (1 - hp), by + 2 * u, bw * hp, 2 * u, 0x66FFFFFF);
 		const float nx = i == 0 ? bx : bx + bw;
 		const int al = i == 0 ? ALIGN_L : ALIGN_R;
-		d.Text(Name(v.character), nx, by + bh + 8.5f * u, 9 * u, 0xFFFFFFFF, al);
+		d.Text(Name(v, i), nx, by + bh + 8.5f * u, 9 * u, 0xFFFFFFFF, al);
 		// Burst: small bar next to the name.
-		const float burst = v.burst / kMaxBurst;
-		const float rw = 40 * u, rx = i == 0 ? bx + bw - rw : bx;
-		d.Rect(rx, by + bh + 6 * u, rw, 5 * u, 0xFF202030);
-		d.Rect(i == 0 ? rx + rw * (1 - burst) : rx, by + bh + 6 * u, rw * burst, 5 * u, burst >= 1.0f ? 0xFFFFFFFF : 0xFF59B3FF);
-		d.Text("BURST", i == 0 ? rx - 3 * u : rx + rw + 3 * u, by + bh + 8.5f * u, 6 * u, burst >= 1.0f ? 0xFFFFFFFF : 0xFF8890A8, i == 0 ? ALIGN_R : ALIGN_L);
+		if (v.gauge >= 0 && tr.style->gauge) {
+			const float burst = v.gauge;
+			const float rw = 40 * u, rx = i == 0 ? bx + bw - rw : bx;
+			d.Rect(rx, by + bh + 6 * u, rw, 5 * u, 0xFF202030);
+			d.Rect(i == 0 ? rx + rw * (1 - burst) : rx, by + bh + 6 * u, rw * burst, 5 * u, burst >= 1.0f ? 0xFFFFFFFF : 0xFF59B3FF);
+			d.Text(tr.style->gauge, i == 0 ? rx - 3 * u : rx + rw + 3 * u, by + bh + 8.5f * u, 6 * u, burst >= 1.0f ? 0xFFFFFFFF : 0xFF8890A8, i == 0 ? ALIGN_R : ALIGN_L);
+		}
 
 		// Tension.
 		const float tw = 150 * u, th = 8 * u, ty = f.gy + f.gh - 13 * u;
 		const float tx = i == 0 ? f.gx + 8 * u : f.gx + f.gw - 8 * u - tw;
-		const float ten = v.tension / kMaxTension;
+		const float ten = v.meter;
 		d.Rect(tx - u, ty - u, tw + 2 * u, th + 2 * u, 0xFF8890A8);
 		d.Rect(tx, ty, tw, th, 0xFF101028);
 		const u32 tc = ten >= 1.0f ? 0xFFFFFFFF : ten >= 0.5f ? 0xFFFF7A1A : 0xFF4FC3FF;
 		d.VGrad(i == 0 ? tx : tx + tw * (1 - ten), ty, tw * ten, th, tc, Mix(tc, 0xFF000000, 0.45f));
 		d.Rect(tx + tw * 0.5f - 0.5f * u, ty, u, th, 0xFFFFFFFF);
-		d.Text("TENSION", i == 0 ? tx : tx + tw, ty - 6 * u, 6.5f * u, 0xFF8890A8, al);
-		d.Text(Pct(v.tension, kMaxTension), i == 0 ? tx + tw + 4 * u : tx - 4 * u, ty + th * 0.5f, 9 * u, tc, i == 0 ? ALIGN_L : ALIGN_R);
+		d.Text(tr.style->meter, i == 0 ? tx : tx + tw, ty - 6 * u, 6.5f * u, 0xFF8890A8, al);
+		d.Text(MeterText(*tr.style, v, false), i == 0 ? tx + tw + 4 * u : tx - 4 * u, ty + th * 0.5f, 9 * u, tc, i == 0 ? ALIGN_L : ALIGN_R);
 
 		if (v.comboShown) {
 			const float fade = ComboFade(v, tr.now), pop = Pop(v, tr.now);
@@ -483,9 +522,11 @@ inline void DrawArcade(Painter &d, const Tracker &tr, const Frame &f) {
 			d.Text(Num(v.comboDamage) + " DAMAGE", x, f.gy + 80 * u, 8 * u, Alpha(0xFFFFFFFF, fade), ALIGN_C);
 		}
 	}
-	d.Rect(cx - 16 * u, f.gy + 3 * u, 32 * u, 26 * u, gold);
-	d.VGrad(cx - 15 * u, f.gy + 4 * u, 30 * u, 24 * u, 0xFF202030, 0xFF000000);
-	d.Text(TimerText(tr.timer), cx, f.gy + 16 * u, 18 * u, 0xFFFFFFFF, ALIGN_C);
+	if (tr.style->timer) {
+		d.Rect(cx - 16 * u, f.gy + 3 * u, 32 * u, 26 * u, gold);
+		d.VGrad(cx - 15 * u, f.gy + 4 * u, 30 * u, 24 * u, 0xFF202030, 0xFF000000);
+		d.Text(TimerText(tr.timer), cx, f.gy + 16 * u, 18 * u, 0xFFFFFFFF, ALIGN_C);
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -509,10 +550,10 @@ inline void DrawSide(Painter &d, const Tracker &tr, const Frame &f) {
 		d.VGrad(px, top, pw, bottom - top, outside ? 0xFF15151E : 0xA0000000, outside ? 0xFF0B0B10 : 0x80000000);
 		d.Rect(px, top, pw, u, side[i]);
 		const float cx = px + pw * 0.5f;
-		d.Text(Name(v.character), cx, top + 8 * u, std::min(8.5f * u, pw / 5.5f), side[i], ALIGN_C);
+		d.Text(Name(v, i), cx, top + 8 * u, std::min(8.5f * u, pw / 5.5f), side[i], ALIGN_C);
 		// Health: tall bar, empties from the top.
 		const float hx = px + pw * 0.18f, hw = pw * 0.34f, hy = top + 18 * u, hh = (bottom - top) * 0.62f;
-		const float hp = v.health / kMaxHealth, trail = v.trail / kMaxHealth;
+		const float hp = v.health / v.healthMax, trail = v.trail / v.healthMax;
 		d.Rect(hx, hy, hw, hh, 0xFF05050A);
 		d.Rect(hx, hy + hh * (1 - trail), hw, hh * (trail - hp), 0xFFFFFFFF);
 		const bool low = hp < 0.3f;
@@ -521,19 +562,23 @@ inline void DrawSide(Painter &d, const Tracker &tr, const Frame &f) {
 			d.Rect(hx, hy + hh * k / 4.0f, hw, 0.6f * u, 0x80000000);
 		// Tension: thinner bar next to it.
 		const float tx = px + pw * 0.60f, tw = pw * 0.18f;
-		const float ten = v.tension / kMaxTension;
+		const float ten = v.meter;
 		const u32 tc = ten >= 1.0f ? 0xFFFFFFFF : ten >= 0.5f ? 0xFFFFD34A : 0xFF6E8BFF;
 		d.Rect(tx, hy, tw, hh, 0xFF05050A);
 		d.VGrad(tx, hy + hh * (1 - ten), tw, hh * ten, tc, Mix(tc, 0xFF000000, 0.4f));
 		d.Rect(tx - 0.5f * u, hy + hh * 0.5f, tw + u, 0.8f * u, 0xFFFFFFFF);
 		const float ly = hy + hh + 7 * u;
-		d.Text(Pct(v.health, kMaxHealth), hx + hw * 0.5f, ly, std::min(7 * u, pw / 6.0f), 0xFFFFFFFF, ALIGN_C);
-		d.Text(Pct(v.tension, kMaxTension), tx + tw * 0.5f, ly, std::min(7 * u, pw / 6.0f), tc, ALIGN_C);
-		// Burst: a short bar at the bottom.
-		const float burst = v.burst / kMaxBurst;
+		d.Text(Pct(v.health, v.healthMax), hx + hw * 0.5f, ly, std::min(7 * u, pw / 6.0f), 0xFFFFFFFF, ALIGN_C);
+		d.Text(Pct(v.meter), tx + tw * 0.5f, ly, std::min(7 * u, pw / 6.0f), tc, ALIGN_C);
+		// Burst: a short bar at the bottom (or the power stocks).
 		const float by = ly + 7 * u;
-		d.Rect(px + pw * 0.15f, by, pw * 0.7f, 3 * u, 0xFF05050A);
-		d.Rect(px + pw * 0.15f, by, pw * 0.7f * burst, 3 * u, burst >= 1.0f ? 0xFFFFFFFF : side[i]);
+		if (v.gauge >= 0 && tr.style->gauge) {
+			const float burst = v.gauge;
+			d.Rect(px + pw * 0.15f, by, pw * 0.7f, 3 * u, 0xFF05050A);
+			d.Rect(px + pw * 0.15f, by, pw * 0.7f * burst, 3 * u, burst >= 1.0f ? 0xFFFFFFFF : side[i]);
+		} else if (v.stocks >= 0) {
+			d.Text("×" + Num(v.stocks), cx, by + 1.5f * u, std::min(7.5f * u, pw / 5.0f), tc, ALIGN_C);
+		}
 		if (v.comboShown) {
 			const float fade = ComboFade(v, tr.now), pop = Pop(v, tr.now);
 			const float cy = std::min(bottom - 14 * u, by + 22 * u);
@@ -557,29 +602,38 @@ inline void DrawData(Painter &d, const Tracker &tr, const Frame &f) {
 		d.Rect(bx, by, 2 * u, bh, side[i]);
 		const float x = bx + 6 * u, line = 9.5f * u;
 		float y = by + 6.5f * u;
-		d.Text(Name(v.character), x, y, 8 * u, side[i], ALIGN_L);
-		d.Text(Num((int)v.health) + "/" + Num(kMaxHealth) + "  " + Pct(v.health, kMaxHealth), bx + bw - 5 * u, y, 7.5f * u, 0xFFFFFFFF, ALIGN_R);
+		d.Text(Name(v, i), x, y, 8 * u, side[i], ALIGN_L);
+		d.Text(Num((int)v.health) + "/" + Num((int)v.healthMax) + "  " + Pct(v.health, v.healthMax), bx + bw - 5 * u, y, 7.5f * u, 0xFFFFFFFF, ALIGN_R);
 		auto bar = [&](float yy, float frac, u32 c) {
 			d.Rect(bx + 56 * u, yy - 2 * u, bw - 61 * u, 4 * u, 0xFF262630);
 			d.Rect(bx + 56 * u, yy - 2 * u, (bw - 61 * u) * frac, 4 * u, c);
 		};
 		y += line;
-		const float ten = v.tension / kMaxTension;
+		const float ten = v.meter;
 		char buf[64];
-		snprintf(buf, sizeof(buf), "Tensión %.1f%%", ten * 100.0f);
+		snprintf(buf, sizeof(buf), "%s %.1f%%", tr.style->meterWord, ten * 100.0f);
 		d.Text(buf, x, y, 7 * u, 0xFFE0E0E8, ALIGN_L, false);
 		bar(y, ten, ten >= 0.5f ? 0xFFFFD34A : 0xFF6E8BFF);
 		y += line;
-		const float burst = v.burst / kMaxBurst;
-		snprintf(buf, sizeof(buf), "Burst %d%%", (int)(burst * 100.0f));
-		d.Text(buf, x, y, 7 * u, 0xFFE0E0E8, ALIGN_L, false);
-		bar(y, burst, burst >= 1.0f ? 0xFFFFFFFF : 0xFF59B3FF);
+		if (v.gauge >= 0 && tr.style->gauge) {
+			const float burst = v.gauge;
+			snprintf(buf, sizeof(buf), "%s %d%%", tr.style->gaugeWord, (int)(burst * 100.0f));
+			d.Text(buf, x, y, 7 * u, 0xFFE0E0E8, ALIGN_L, false);
+			bar(y, burst, burst >= 1.0f ? 0xFFFFFFFF : 0xFF59B3FF);
+		} else if (v.stocks >= 0) {
+			snprintf(buf, sizeof(buf), "Stock %d", v.stocks);
+			d.Text(buf, x, y, 7 * u, 0xFFE0E0E8, ALIGN_L, false);
+		} else if (tr.style->timer && i == 0) {
+			snprintf(buf, sizeof(buf), "Tiempo %s", TimerText(tr.timer).c_str());
+			d.Text(buf, x, y, 7 * u, 0xFFA0A0B0, ALIGN_L, false);
+		}
 		y += line;
+		const char *approx = v.estimated ? "≈" : "";
 		if (v.comboShown) {
-			snprintf(buf, sizeof(buf), "Combo %d hits  %d daño", v.comboHits, v.comboDamage);
+			snprintf(buf, sizeof(buf), "Combo %s%d hits  %d daño", approx, v.comboHits, v.comboDamage);
 			d.Text(buf, x, y, 7.5f * u, 0xFFFFD34A, ALIGN_L, false);
 		} else if (v.lastComboHits >= 2) {
-			snprintf(buf, sizeof(buf), "Último: %d hits  %d daño", v.lastComboHits, v.lastComboDamage);
+			snprintf(buf, sizeof(buf), "Último: %s%d hits  %d daño", approx, v.lastComboHits, v.lastComboDamage);
 			d.Text(buf, x, y, 7 * u, 0xFFA0A0B0, ALIGN_L, false);
 		} else {
 			d.Text("Sin combos todavía", x, y, 7 * u, 0xFF70707C, ALIGN_L, false);

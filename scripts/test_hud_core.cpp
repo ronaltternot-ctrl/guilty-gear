@@ -6,9 +6,16 @@
 #include <string>
 #include <vector>
 
-#include "AcPlusHudCore.h"
+#include "AcPlusGameData.h"
 
 using namespace AcHud;
+using namespace AcGame::GG;
+
+static Snapshot Read(const Mem &m) {
+	Snapshot s;
+	AcGame::GG::Read(m, &s);
+	return s;
+}
 
 const u32 kRamStart = 0x08800000, kRamEnd = 0x0A000000;
 
@@ -117,13 +124,14 @@ int main(int argc, char **argv) {
 		Tracker demo;
 		demo.visible = 1.0f;
 		demo.now = 100.0;
-		demo.timer = 57 * 60;
-		demo.p[0].character = 1;
-		demo.p[1].character = 2;
+		demo.timer = 57;
+		demo.p[0].name = "SOL";
+		demo.p[1].name = "KY";
+		demo.p[0].healthMax = demo.p[1].healthMax = kMaxHealth;
 		demo.p[0].health = 294; demo.p[0].trail = 294;
 		demo.p[1].health = 104; demo.p[1].trail = 168;
-		demo.p[0].tension = 5230; demo.p[1].tension = 10000;
-		demo.p[0].burst = 15000; demo.p[1].burst = 6200;
+		demo.p[0].meter = 0.523f; demo.p[1].meter = 1.0f;
+		demo.p[0].gauge = 1.0f; demo.p[1].gauge = 0.4133f;
 		demo.p[0].comboHits = 12; demo.p[0].comboDamage = 143; demo.p[0].comboShown = true;
 		demo.p[0].comboChanged = 99.0; demo.p[0].comboEnded = -1;
 		demo.p[1].lastComboHits = 7; demo.p[1].lastComboDamage = 96;

@@ -1,9 +1,10 @@
-// GGXX AC+ launcher build: custom HUD (health, tension, burst, combo counter) drawn over the
-// game from values read in its memory. Values, tracking and the designs are in AcPlusHudCore.h;
-// this file reads PSP memory and draws the primitives with PPSSPP's UI renderer.
+// GGXX AC+ launcher build: custom HUD (health, power meter, burst, timer, combo counter) drawn
+// over the game from values read in its memory. The values come from AcPlusGameData.h (Guilty
+// Gear XX ΛC+ US, BlazBlue CT US/EU and CS II US, KOF Orochi Saga US); tracking and the designs
+// are in AcPlusHudCore.h. This file reads PSP memory and draws the primitives with PPSSPP's UI
+// renderer.
 //
 // Turned on from the launcher: acplus.ini, section [Hud] (Enabled, Design 1-4, Opacity).
-// US version (ULUS-10409) only, like the other memory-based features.
 //
 // Included only from EmuScreen.cpp.
 
@@ -25,6 +26,7 @@
 #include "Core/ELF/ParamSFO.h"
 #include "GPU/Common/PresentationCommon.h"
 #include "UI/AcPlusHudCore.h"
+#include "UI/AcPlusGameData.h"
 
 namespace AcPlusHud {
 
@@ -38,6 +40,7 @@ struct State {
 	bool active = false;
 	int design = AcHud::DESIGN_NEON;
 	float opacity = 1.0f;
+	AcGame::Reader reader;
 	AcHud::Tracker tracker;
 	std::vector<AcHud::Prim> prims;
 	float fontUnit = 0.0f;   // height of the HUD font at scale 1
@@ -66,8 +69,9 @@ inline void Init() {
 	sec->Get("Opacity", &opacity);
 	s.opacity = std::clamp(opacity, 20, 100) / 100.0f;
 	const std::string gameId = g_paramSFO.GetValueString("DISC_ID");
-	s.active = enabled && s.design >= AcHud::DESIGN_NEON && s.design <= AcHud::DESIGN_DATA && gameId == "ULUS10409";
-	INFO_LOG(Log::System, "AcPlus: custom HUD %s (design %d, game %s)", s.active ? "on" : "off", s.design, gameId.c_str());
+	s.reader.Init(gameId);
+	s.active = enabled && s.design >= AcHud::DESIGN_NEON && s.design <= AcHud::DESIGN_DATA && s.reader.Supported();
+	INFO_LOG(Log::System, "AcPlus: custom HUD %s (design %d, game %s, %s)", s.active ? "on" : "off", s.design, gameId.c_str(), s.reader.Label());
 }
 
 // Once per frame while the game runs.
@@ -77,7 +81,10 @@ inline void Update() {
 	if (!s.active)
 		return;
 	PspMem m;
-	s.tracker.Update(AcHud::Read(m), time_now_d());
+	const double t = time_now_d();
+	AcHud::Snapshot snap;
+	s.reader.Read(m, t, &snap);
+	s.tracker.Update(snap, t);
 }
 
 // 0xAARRGGBB -> PPSSPP's 0xAABBGGRR.

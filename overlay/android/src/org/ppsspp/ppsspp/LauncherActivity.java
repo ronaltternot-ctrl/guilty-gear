@@ -296,6 +296,7 @@ public class LauncherActivity extends Activity {
 	private TextView side1p;
 	private TextView side2p;
 	private TextView profilesStatus;
+	private TextView gameReportButton;
 	private Switch hitboxSwitch;
 	private LinearLayout hitboxOptions;
 	private final Switch[] hitboxParts = new Switch[HB_KEYS.length];
@@ -555,8 +556,13 @@ public class LauncherActivity extends Activity {
 		return new File(memstickDir(), "PSP/SYSTEM/acplus_profiles");
 	}
 
-	private File savedProfile(int character) {
-		return new File(profilesDir(), String.format(Locale.ROOT, "char_%02d.ini", character));
+	/** "12" -> char_12.ini (Guilty Gear, by number); "bb_rg" -> bb_rg.ini. */
+	private File savedProfile(String key) {
+		try {
+			return new File(profilesDir(), String.format(Locale.ROOT, "char_%02d.ini", Integer.parseInt(key)));
+		} catch (NumberFormatException e) {
+			return new File(profilesDir(), key + ".ini");
+		}
 	}
 
 	private void writeEmulatorConfig() throws IOException {
@@ -697,11 +703,12 @@ public class LauncherActivity extends Activity {
 		for (String preset : new String[] { STYLE_PSP, STYLE_ARCADE }) {
 			boolean arcade = STYLE_ARCADE.equals(preset);
 			StringBuilder layout = new StringBuilder("[Control]\n");
+			// The game being launched decides the arcade labels (P K S HS D or A B C D).
 			if (arcade) {
-				appendArcadeButtonDefinitions(layout, GameInspector.KIND_GG);
+				appendArcadeButtonDefinitions(layout, gameKind());
 			}
 			layout.append("[TouchControls.Landscape]\n").append("ShowTouchUnthrottle = False\n");
-			appendTouchLayout(layout, arcade, GameInspector.KIND_GG);
+			appendTouchLayout(layout, arcade, gameKind());
 			writeText(new File(getFilesDir(), "acplus_layout_" + preset + ".ini"), layout.toString());
 		}
 
@@ -712,10 +719,12 @@ public class LauncherActivity extends Activity {
 			.append("Side = ").append(prefs.getInt(K_SIDE, 0)).append('\n')
 			.append("DefaultStyle = ").append(prefs.getString(K_STYLE, STYLE_PSP)).append('\n')
 			.append("[Characters]\n");
-		for (int id = 1; id < CHARACTERS.length; id++) {
-			String s = prefs.getString(K_CHAR_STYLE + id, null);
-			if (STYLE_PSP.equals(s) || STYLE_ARCADE.equals(s)) {
-				ini.append(id).append(" = ").append(s).append('\n');
+		for (GameRosters.Roster roster : GameRosters.ALL) {
+			for (String key : roster.keys) {
+				String s = prefs.getString(K_CHAR_STYLE + key, null);
+				if (STYLE_PSP.equals(s) || STYLE_ARCADE.equals(s)) {
+					ini.append(key).append(" = ").append(s).append('\n');
+				}
 			}
 		}
 		ini.append("[Hitboxes]\n")
@@ -1096,12 +1105,12 @@ public class LauncherActivity extends Activity {
 			case BLAZBLUE:
 				gameStatus.setText("✓ " + r.title);
 				gameStatus.setTextColor(C_OK);
-				detail.append("\nBlazBlue: botones A, B, C y D, gestos y efectos listos. El visor de hitboxes, el HUD propio y los perfiles por personaje son solo de Guilty Gear.");
+				detail.append("\nBlazBlue: botones A, B, C y D, gestos, HUD propio, perfiles por personaje y efectos listos. El visor de hitboxes es solo de Guilty Gear.");
 				break;
 			case KOF:
 				gameStatus.setText("✓ " + r.title);
 				gameStatus.setTextColor(C_OK);
-				detail.append("\nKOF: botones Neo Geo A, B, C y D, gestos y efectos listos. El visor de hitboxes, el HUD propio y los perfiles por personaje son solo de Guilty Gear.");
+				detail.append("\nKOF: botones Neo Geo A, B, C y D, gestos, HUD propio, perfiles por personaje ('96–'98) y efectos listos. El visor de hitboxes es solo de Guilty Gear.");
 				break;
 			case OTHER_GUILTY_GEAR:
 				gameStatus.setText("⚠ Otro Guilty Gear: " + r.title);
@@ -1297,9 +1306,9 @@ public class LauncherActivity extends Activity {
 		{ "Guilty Gear XX ΛCore Plus", "ULUS-10409 (América) · también otras versiones",
 			"Botones arcade P K S HS D, gestos con especiales por personaje, perfiles por personaje, visor de hitboxes, HUD propio, efectos y FSR. Lo que lee la memoria del juego (perfiles, visor, HUD y especiales por personaje) necesita la versión ULUS-10409." },
 		{ "BlazBlue: Calamity Trigger Portable", "ULUS-10519 · ULES-01497 · ULJM-05613 · también Continuum Shift II",
-			"Botones arcade A B C D, gestos (cadena A → B → C, Drive con ✕), cuatro especiales iguales para todos los personajes, efectos y FSR." },
+			"Botones arcade A B C D, gestos (cadena A → B → C, Drive con ✕), HUD propio (vida, Heat y combos) y perfiles por personaje (experimental; CT americano y europeo, CS II americano), efectos y FSR." },
 		{ "The King of Fighters Collection: The Orochi Saga", "ULUS-10360 · ULES-01191",
-			"Botones Neo Geo A B C D, gestos (cadena A → B → C → D, CD, Roll y MAX), cuatro especiales iguales para todos los personajes, efectos y FSR." },
+			"Botones Neo Geo A B C D, gestos (cadena A → B → C → D, CD, Roll y MAX), HUD propio (vida, POW y tiempo) en las cinco entregas, perfiles por personaje en '96, '97 y '98 (versión americana), efectos y FSR." },
 	};
 	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF };
 
@@ -1878,6 +1887,17 @@ public class LauncherActivity extends Activity {
 		return id == null || PROFILE_GAME_ID.equalsIgnoreCase(id.replace("-", ""));
 	}
 
+	/** The HUD and the profiles can read this copy (or no game chosen yet). */
+	private boolean isMemoryGame() {
+		String id = prefs.getString(K_ID, null);
+		return id == null || GameRosters.memoryKnown(id);
+	}
+
+	private String prettyGameId() {
+		String id = new GameInspector.Result(null, prefs.getString(K_ID, ""), null).prettyDiscId();
+		return id == null ? "" : id;
+	}
+
 	private void refreshProfiles() {
 		boolean on = prefs.getBoolean(K_PROFILES, true);
 		profilesSwitch.setChecked(on);
@@ -1889,21 +1909,29 @@ public class LauncherActivity extends Activity {
 			styleChip(gestureSide2p, side == 1);
 		}
 		profilesOptions.setAlpha(on ? 1f : 0.45f);
+		int kind = gameKind();
+		GameRosters.Roster roster = GameRosters.forKind(kind);
 		int saved = 0;
 		int custom = 0;
-		for (int id = 1; id < CHARACTERS.length; id++) {
-			if (savedProfile(id).isFile()) {
+		for (String key : roster.keys) {
+			if (savedProfile(key).isFile()) {
 				saved++;
 			}
-			if (prefs.getString(K_CHAR_STYLE + id, null) != null) {
+			if (prefs.getString(K_CHAR_STYLE + key, null) != null) {
 				custom++;
 			}
 		}
 		StringBuilder s = new StringBuilder();
-		if (!isProfileGame()) {
-			s.append(gameKind() != GameInspector.KIND_GG
-				? "⚠ Con " + gameShortName() + " no se usa: los perfiles por personaje son solo de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
-				: "⚠ Tu copia es " + prefs.getString(K_ID, "") + ". El cambio automático solo funciona con la versión americana (ULUS-10409); con otras versiones se usa siempre el tipo de botones general.\n\n");
+		if (!isMemoryGame()) {
+			s.append("⚠ Tu copia es ").append(prettyGameId()).append(". El cambio automático funciona con ").append(GameRosters.knownVersions(kind))
+				.append("; con otras versiones se usa siempre el tipo de botones general.\n\n");
+		} else if (kind == GameInspector.KIND_BB) {
+			s.append("En BlazBlue la app reconoce a tu personaje por los nombres de sus sprites en la memoria del juego (experimental).\n\n");
+		} else if (kind == GameInspector.KIND_KOF) {
+			s.append("En KOF funciona en '96, '97 y '98: los botones cambian cuando entra el siguiente miembro de tu equipo. En '94 y '95 se usa el tipo de botones general.\n\n");
+		}
+		if (gameReportButton != null) {
+			gameReportButton.setVisibility(kind == GameInspector.KIND_GG ? View.GONE : View.VISIBLE);
 		}
 		s.append(custom == 0 ? "Todos usan el tipo de botones general." : custom + (custom == 1 ? " personaje tiene" : " personajes tienen") + " un tipo de botones propio.");
 		s.append(saved == 0 ? "" : "\n" + saved + (saved == 1 ? " personaje tiene" : " personajes tienen") + " una distribución guardada.");
@@ -1929,10 +1957,13 @@ public class LauncherActivity extends Activity {
 		hudPreview.setImageResource(HUD_PREVIEWS[design - 1]);
 		hudPreview.setContentDescription("Vista previa del HUD " + HUD_NAMES[design - 1]);
 		String desc = HUD_DESCRIPTIONS[design - 1];
-		if (!isProfileGame()) {
-			desc = (gameKind() != GameInspector.KIND_GG
-				? "⚠ Con " + gameShortName() + " no se usa: el HUD propio lee la memoria de Guilty Gear XX ΛC+ (versión americana ULUS-10409).\n\n"
-				: "⚠ Tu copia es " + prefs.getString(K_ID, "") + ": el HUD propio solo funciona con la versión americana (ULUS-10409).\n\n") + desc;
+		int kind = gameKind();
+		if (!isMemoryGame()) {
+			desc = "⚠ Tu copia es " + prettyGameId() + ": el HUD propio funciona con " + GameRosters.knownVersions(kind) + ".\n\n" + desc;
+		} else if (kind == GameInspector.KIND_BB) {
+			desc = "En BlazBlue: vida, Heat y combos (los golpes se cuentan por las bajadas de vida). Los nombres salen cuando la app reconoce al personaje; BlazBlue no tiene tiempo en el HUD propio.\n\n" + desc;
+		} else if (kind == GameInspector.KIND_KOF) {
+			desc = "En KOF: vida, POW o POWER con sus stocks, y tiempo. Los combos se cuentan por las bajadas de vida y los nombres salen en '96, '97 y '98.\n\n" + desc;
 		}
 		hudDesc.setText(desc);
 		int alpha = prefs.getInt(K_HUD_ALPHA, 100);
@@ -2618,6 +2649,19 @@ public class LauncherActivity extends Activity {
 		shareFiles(files, "Informe del visor de hitboxes de GGXX AC+", "Enviar informe del visor");
 	}
 
+	/** What the emulator read in BlazBlue / KOF (UI/AcPlusProfiles.h writes it while playing). */
+	private void shareGameReport() {
+		File report = new File(memstickDir(), "PSP/SYSTEM/acplus_game_report.txt");
+		if (!report.isFile()) {
+			showMessage("Todavía no hay informe",
+				"Con «Cambiar los botones según el personaje» activado (y sin gestos), juega un combate unos segundos y vuelve aquí.");
+			return;
+		}
+		ArrayList<File> files = new ArrayList<>();
+		files.add(report);
+		shareFiles(files, "Informe de " + gameShortName() + " para GGXX AC+ (qué leyó la app en la memoria del juego)", "Enviar informe del juego");
+	}
+
 	private void shareFiles(List<File> files, String text, String title) {
 		ArrayList<Uri> uris = new ArrayList<>();
 		long total = 0;
@@ -2650,51 +2694,54 @@ public class LauncherActivity extends Activity {
 		}
 	}
 
-	private String characterStyleLabel(int id) {
-		String style = prefs.getString(K_CHAR_STYLE + id, null);
+	private String characterStyleLabel(String key) {
+		String style = prefs.getString(K_CHAR_STYLE + key, null);
 		String label = STYLE_ARCADE.equals(style) ? "Arcade" : STYLE_PSP.equals(style) ? "PSP" : "General";
-		if (savedProfile(id).isFile()) {
+		if (savedProfile(key).isFile()) {
 			label += " · distribución guardada";
 		}
 		return label;
 	}
 
+	/** The characters of the chosen game. */
 	private void showCharacterList() {
-		String[] rows = new String[CHARACTERS.length - 1];
-		for (int id = 1; id < CHARACTERS.length; id++) {
-			rows[id - 1] = CHARACTERS[id] + "  —  " + characterStyleLabel(id);
+		final GameRosters.Roster roster = GameRosters.forKind(gameKind());
+		String[] rows = new String[roster.keys.length];
+		for (int i = 0; i < roster.keys.length; i++) {
+			rows[i] = roster.names[i] + "  —  " + characterStyleLabel(roster.keys[i]);
 		}
 		new AlertDialog.Builder(this)
-			.setTitle("Botones por personaje")
-			.setItems(rows, (d, which) -> showCharacterOptions(which + 1))
+			.setTitle("Botones por personaje · " + gameShortName())
+			.setItems(rows, (d, which) -> showCharacterOptions(roster, which))
 			.setNegativeButton("Cerrar", null)
 			.show();
 	}
 
-	private void showCharacterOptions(int id) {
-		final boolean hasSaved = savedProfile(id).isFile();
+	private void showCharacterOptions(GameRosters.Roster roster, int index) {
+		final String key = roster.keys[index];
+		final boolean hasSaved = savedProfile(key).isFile();
 		String[] options = hasSaved
 			? new String[] { "General (el de la sección Controles)", "PSP", "Arcade", "Borrar la distribución guardada" }
 			: new String[] { "General (el de la sección Controles)", "PSP", "Arcade" };
 		new AlertDialog.Builder(this)
-			.setTitle(CHARACTERS[id])
+			.setTitle(roster.names[index])
 			.setItems(options, (d, which) -> {
 				if (which == 3) {
-					deleteSavedProfile(id);
+					deleteSavedProfile(key);
 				} else {
 					String style = which == 1 ? STYLE_PSP : which == 2 ? STYLE_ARCADE : null;
-					String old = prefs.getString(K_CHAR_STYLE + id, null);
+					String old = prefs.getString(K_CHAR_STYLE + key, null);
 					SharedPreferences.Editor e = prefs.edit();
 					if (style == null) {
-						e.remove(K_CHAR_STYLE + id);
+						e.remove(K_CHAR_STYLE + key);
 					} else {
-						e.putString(K_CHAR_STYLE + id, style);
+						e.putString(K_CHAR_STYLE + key, style);
 					}
 					e.apply();
 					// A new button type replaces the layout saved for this character.
 					boolean changed = old == null ? style != null : !old.equals(style);
 					if (changed) {
-						deleteSavedProfile(id);
+						deleteSavedProfile(key);
 					}
 				}
 				refreshProfiles();
@@ -2704,22 +2751,23 @@ public class LauncherActivity extends Activity {
 			.show();
 	}
 
-	private void deleteSavedProfile(int id) {
-		File f = savedProfile(id);
+	private void deleteSavedProfile(String key) {
+		File f = savedProfile(key);
 		if (f.isFile() && !f.delete()) {
 			Log.w(TAG, "Could not delete " + f);
 		}
 	}
 
 	private void confirmResetProfiles() {
+		final GameRosters.Roster roster = GameRosters.forKind(gameKind());
 		new AlertDialog.Builder(this)
-			.setTitle("¿Restablecer todos los personajes?")
-			.setMessage("Todos volverán al tipo de botones general y se borrarán las distribuciones guardadas por personaje.")
+			.setTitle("¿Restablecer los personajes de " + gameShortName() + "?")
+			.setMessage("Todos volverán al tipo de botones general y se borrarán las distribuciones guardadas por personaje de este juego.")
 			.setPositiveButton("Restablecer", (d, w) -> {
 				SharedPreferences.Editor e = prefs.edit();
-				for (int id = 1; id < CHARACTERS.length; id++) {
-					e.remove(K_CHAR_STYLE + id);
-					deleteSavedProfile(id);
+				for (String key : roster.keys) {
+					e.remove(K_CHAR_STYLE + key);
+					deleteSavedProfile(key);
 				}
 				e.apply();
 				refreshProfiles();
@@ -3195,7 +3243,12 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		resetParams.topMargin = dp(8);
 		profilesOptions.addView(reset, resetParams);
-		TextView profileNote = text("Al empezar el combate verás «Controles: nombre». Solo funciona con la versión americana del juego (ULUS-10409) y en combates individuales.", 13, C_MUTED, false);
+		gameReportButton = outlineButton("Enviar informe del juego");
+		gameReportButton.setOnClickListener(v -> shareGameReport());
+		LinearLayout.LayoutParams reportParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		reportParams.topMargin = dp(8);
+		profilesOptions.addView(gameReportButton, reportParams);
+		TextView profileNote = text("Al empezar el combate verás «Controles: nombre». Funciona con Guilty Gear XX ΛC+ (versión americana, combates individuales), BlazBlue (experimental) y KOF '96, '97 y '98. Cada juego tiene su propia lista de personajes.", 13, C_MUTED, false);
 		profileNote.setPadding(0, dp(12), 0, 0);
 		profilesOptions.addView(profileNote);
 
@@ -3338,7 +3391,7 @@ public class LauncherActivity extends Activity {
 		// Custom HUD (UI/AcPlusHud.h)
 		LinearLayout hud = section(col, "HUD PROPIO");
 		hudSwitch = switchRow(hud, "Mostrar mi HUD",
-			"Barras de vida, tensión y burst, y contador de combos con su daño, leídos de la memoria del juego y dibujados encima. Versión americana (ULUS-10409).");
+			"Barras de vida, el medidor de poder (tensión, Heat o POW) y contador de combos con su daño, leídos de la memoria del juego y dibujados encima. Guilty Gear, BlazBlue y KOF.");
 		hudSwitch.setOnCheckedChangeListener((b, checked) -> {
 			prefs.edit().putBoolean(K_HUD_ON, checked).apply();
 			refreshHud();
