@@ -36,10 +36,13 @@ final class GameCatalog {
 	static final int MAX_GAMES = 40;
 
 	/** Badge of each kind of game in the catalog. */
-	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3;
+	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4;
 
-	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO" };
-	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78 };
+	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER" };
+	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E };
+
+	/** Order of the filters in the catalog ("other" last). */
+	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_OTHER };
 
 	static int badge(String discId, String title) {
 		switch (new GameInspector.Result(null, discId, title).match()) {
@@ -50,6 +53,8 @@ final class GameCatalog {
 				return BADGE_BB;
 			case KOF:
 				return BADGE_KOF;
+			case STREET_FIGHTER:
+				return BADGE_SF;
 			default:
 				return BADGE_OTHER;
 		}
@@ -199,6 +204,7 @@ final class GameCatalog {
 			case BADGE_GG: big = "GG"; break;
 			case BADGE_BB: big = "BB"; break;
 			case BADGE_KOF: big = "KOF"; break;
+			case BADGE_SF: big = "SF"; break;
 			default: big = initials(title); break;
 		}
 		Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);

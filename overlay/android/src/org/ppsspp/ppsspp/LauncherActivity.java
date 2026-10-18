@@ -168,9 +168,23 @@ public class LauncherActivity extends Activity {
 		+ "• Arriba a la izquierda: Start, ✕ y ○ para los menús, y una flecha que indica hacia dónde miras. Si los especiales salen al revés, tócala.\n"
 		+ "Cada entrega de la colección tiene sus reglas: por ejemplo, en '94 no se puede rodar.";
 
-	/** Gesture specials of BlazBlue and KOF: one set for every character (stored as "bb" / "kof"). */
+	private static final String GESTURE_GUIDE_SF =
+		"• Toca: golpe. Toques seguidos hacen la cadena LP → MP → HP.\n"
+		+ "• Desliza → o ←: dash hacia ese lado. Si dejas el dedo, sigues avanzando.\n"
+		+ "• Desliza ↑, ↗ o ↖: saltar.\n"
+		+ "• Desliza ↓: barrida (2HK).\n"
+		+ "• Toca con dos dedos: HK (patada fuerte).\n"
+		+ "• Desliza con dos dedos → o ←: agarre (→ + HP). Hacia arriba: salto alto.\n"
+		+ "• Mantén dos dedos: bloquear. Bájalos un poco para bloquear agachado.\n"
+		+ "• Mantén un dedo y arrástralo: stick para caminar, agacharte, bloquear o saltar.\n"
+		+ "• Botones de la derecha: tres especiales y un Super Combo (el movimiento sale solo), V-ISM (MP+MK: activa el Custom Combo en V-ism) y Alpha (→ + MP+MK: Alpha Counter mientras bloqueas).\n"
+		+ "• Arriba a la izquierda: Start, ✕ y ○ para los menús, y una flecha que indica hacia dónde miras. Si los especiales salen al revés, tócala.\n"
+		+ "Los botones son los del diseño Arcade de la app: si en el juego cambiaste la configuración de botones, ponla como se indica en «Controles».";
+
+	/** Gesture specials of BlazBlue, KOF and Street Fighter: one set for every character. */
 	private static final int GESTURE_BB = -1;
 	private static final int GESTURE_KOF = -2;
+	private static final int GESTURE_SF = -3;
 	/** Games in the catalog: JSON array of {uri, name, title, id, format}. */
 	private static final String K_LIBRARY = "game_library";
 
@@ -297,6 +311,7 @@ public class LauncherActivity extends Activity {
 	private TextView side2p;
 	private TextView profilesStatus;
 	private TextView gameReportButton;
+	private TextView perCharacterButton;
 	private Switch hitboxSwitch;
 	private LinearLayout hitboxOptions;
 	private final Switch[] hitboxParts = new Switch[HB_KEYS.length];
@@ -588,7 +603,7 @@ public class LauncherActivity extends Activity {
 		// with the game's own layout editor stay where the player put them.
 		// The arcade labels depend on the game (P K S HS D or A B C D).
 		int kind = gameKind();
-		String appliedKey = style + (kind == GameInspector.KIND_BB ? "|bb" : kind == GameInspector.KIND_KOF ? "|kof" : "");
+		String appliedKey = style + (kind == GameInspector.KIND_BB ? "|bb" : kind == GameInspector.KIND_KOF ? "|kof" : kind == GameInspector.KIND_SF ? "|sf" : "");
 		boolean writeLayout = !appliedKey.equals(prefs.getString(K_APPLIED_STYLE, ""));
 
 		StringBuilder ini = new StringBuilder();
@@ -756,6 +771,11 @@ public class LauncherActivity extends Activity {
 			ini.append(slot == 0 ? "" : ",").append(gestureMove(GESTURE_KOF, slot));
 		}
 		ini.append('\n');
+		ini.append("MovesSF = ");
+		for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
+			ini.append(slot == 0 ? "" : ",").append(gestureMove(GESTURE_SF, slot));
+		}
+		ini.append('\n');
 		for (int id = 0; id < CHARACTERS.length; id++) {
 			ini.append("Moves").append(id).append(" = ");
 			for (int slot = 0; slot < GestureMoves.SLOTS; slot++) {
@@ -777,6 +797,7 @@ public class LauncherActivity extends Activity {
 	private static final long KEY_TRIANGLE = 1L << 1;
 	private static final long KEY_CIRCLE = 1L << 2;
 	private static final long KEY_CROSS = 1L << 3;
+	private static final long KEY_L = 1L << 10;
 	private static final long KEY_R = 1L << 11;
 
 	/** Label image indices appended to PPSSPP's customKeyImages (patches/0002). */
@@ -785,6 +806,15 @@ public class LauncherActivity extends Activity {
 	private static final int IMG_S = 38;
 	private static final int IMG_HS = 39;
 	private static final int IMG_D = 40;
+	private static final int IMG_LP = 41;
+	private static final int IMG_MP = 42;
+	private static final int IMG_HP = 43;
+	private static final int IMG_LK = 44;
+	private static final int IMG_MK = 45;
+	private static final int IMG_HK = 46;
+
+	/** Most arcade buttons of any game (Street Fighter's six). */
+	private static final int MAX_ARCADE_BUTTONS = 6;
 
 	/** One arcade button: label, PSP button it presses, and its spot on screen (fractions). */
 	private static final class ArcadeButton {
@@ -859,8 +889,32 @@ public class LauncherActivity extends Activity {
 		new ArcadeButton(IMG_LETTER_D, KEY_CIRCLE, KOF_ARCADE_POSITIONS[3][0], KOF_ARCADE_POSITIONS[3][1]),
 	};
 
+	/** Capcom cabinet: LP MP HP on top, LK MK HK below, each row slightly arched. */
+	static final float[][] SF_ARCADE_POSITIONS = {
+		{ 0.732f, 0.585f },  // LP
+		{ 0.834f, 0.555f },  // MP
+		{ 0.936f, 0.585f },  // HP
+		{ 0.732f, 0.800f },  // LK
+		{ 0.834f, 0.770f },  // MK
+		{ 0.936f, 0.800f },  // HK
+	};
+
+	/**
+	 * Street Fighter Alpha 3 MAX: square LP, triangle MP, R HP, cross LK, circle MK, L HK (the
+	 * PlayStation layout of the series, with the heavy attacks on the shoulder buttons).
+	 */
+	private static final ArcadeButton[] SF_ARCADE_BUTTONS = {
+		new ArcadeButton(IMG_LP, KEY_SQUARE, SF_ARCADE_POSITIONS[0][0], SF_ARCADE_POSITIONS[0][1]),
+		new ArcadeButton(IMG_MP, KEY_TRIANGLE, SF_ARCADE_POSITIONS[1][0], SF_ARCADE_POSITIONS[1][1]),
+		new ArcadeButton(IMG_HP, KEY_R, SF_ARCADE_POSITIONS[2][0], SF_ARCADE_POSITIONS[2][1]),
+		new ArcadeButton(IMG_LK, KEY_CROSS, SF_ARCADE_POSITIONS[3][0], SF_ARCADE_POSITIONS[3][1]),
+		new ArcadeButton(IMG_MK, KEY_CIRCLE, SF_ARCADE_POSITIONS[4][0], SF_ARCADE_POSITIONS[4][1]),
+		new ArcadeButton(IMG_HK, KEY_L, SF_ARCADE_POSITIONS[5][0], SF_ARCADE_POSITIONS[5][1]),
+	};
+
 	private static ArcadeButton[] arcadeButtons(int kind) {
-		return kind == GameInspector.KIND_BB ? BB_ARCADE_BUTTONS : kind == GameInspector.KIND_KOF ? KOF_ARCADE_BUTTONS : ARCADE_BUTTONS;
+		return kind == GameInspector.KIND_BB ? BB_ARCADE_BUTTONS : kind == GameInspector.KIND_KOF ? KOF_ARCADE_BUTTONS
+			: kind == GameInspector.KIND_SF ? SF_ARCADE_BUTTONS : ARCADE_BUTTONS;
 	}
 
 	private static final float BUTTON_SCALE = 1.15f;
@@ -886,13 +940,15 @@ public class LauncherActivity extends Activity {
 			.append("ShowTouchSquare = ").append(psp).append('\n')
 			.append("ShowTouchTriangle = ").append(psp).append('\n')
 			// In Guilty Gear's arcade mode R (Dust) becomes the D button. L (Respect) stays.
-			// BlazBlue and KOF have D on a face button, so R stays too.
-			.append("ShowTouchRTrigger = ").append(arcade && kind == GameInspector.KIND_GG ? "False" : "True").append('\n');
+			// BlazBlue and KOF have D on a face button, so R stays too. In Street Fighter L and R
+			// are the heavy kick and punch, both on the arcade buttons.
+			.append("ShowTouchRTrigger = ").append(arcade && (kind == GameInspector.KIND_GG || kind == GameInspector.KIND_SF) ? "False" : "True").append('\n')
+			.append("ShowTouchLTrigger = ").append(arcade && kind == GameInspector.KIND_SF ? "False" : "True").append('\n');
 		if (arcade) {
 			// Move Start/Select toward the middle so they don't crowd the P button.
 			appendPos(ini, "StartKey", 0.56f, 0.91f, BUTTON_SCALE);
 			appendPos(ini, "SelectKey", 0.44f, 0.91f, BUTTON_SCALE);
-			for (int i = 0; i < ARCADE_BUTTONS.length; i++) {
+			for (int i = 0; i < MAX_ARCADE_BUTTONS; i++) {
 				if (i >= buttons.length) {
 					ini.append("ShowComboKey").append(i).append(" = False\n");
 					continue;
@@ -907,7 +963,7 @@ public class LauncherActivity extends Activity {
 			// -1 tells PPSSPP to put these back in their default spots.
 			ini.append("StartKeyX = -1.0\nStartKeyY = -1.0\n")
 				.append("SelectKeyX = -1.0\nSelectKeyY = -1.0\n");
-			for (int i = 0; i < ARCADE_BUTTONS.length; i++) {
+			for (int i = 0; i < MAX_ARCADE_BUTTONS; i++) {
 				ini.append("ShowComboKey").append(i).append(" = False\n");
 			}
 		}
@@ -1065,7 +1121,7 @@ public class LauncherActivity extends Activity {
 		if (stored == null) {
 			gameStatus.setText("Elige tu copia del juego");
 			gameStatus.setTextColor(C_TEXT);
-			gameDetail.setText("Archivo ISO o CSO de PSP: Guilty Gear XX ΛCore Plus, BlazBlue: Calamity Trigger o The King of Fighters (Orochi Saga). Guárdalo en la memoria del teléfono o en la microSD, no en la nube. En «Catálogo» puedes añadir varios a la vez.");
+			gameDetail.setText("Archivo ISO o CSO de PSP: Guilty Gear XX ΛCore Plus, BlazBlue: Calamity Trigger, The King of Fighters (Orochi Saga) o Street Fighter Alpha 3 MAX. Guárdalo en la memoria del teléfono o en la microSD, no en la nube. En «Catálogo» puedes añadir varios a la vez.");
 			refreshPlayLabel();
 			return;
 		}
@@ -1106,6 +1162,11 @@ public class LauncherActivity extends Activity {
 				gameStatus.setText("✓ " + r.title);
 				gameStatus.setTextColor(C_OK);
 				detail.append("\nBlazBlue: botones A, B, C y D, gestos, HUD propio, perfiles por personaje y efectos listos. El visor de hitboxes es solo de Guilty Gear.");
+				break;
+			case STREET_FIGHTER:
+				gameStatus.setText("✓ " + r.title);
+				gameStatus.setTextColor(C_OK);
+				detail.append("\nStreet Fighter Alpha 3: botones arcade de 6 (LP MP HP / LK MK HK), gestos, HUD propio y efectos listos. Los perfiles por personaje y el visor de hitboxes no están disponibles en este juego.");
 				break;
 			case KOF:
 				gameStatus.setText("✓ " + r.title);
@@ -1150,9 +1211,13 @@ public class LauncherActivity extends Activity {
 		return gameKind() == GameInspector.KIND_KOF;
 	}
 
+	private boolean isStreetFighter() {
+		return gameKind() == GameInspector.KIND_SF;
+	}
+
 	/** Short name for messages ("Guilty Gear XX ΛC+", "BlazBlue", "KOF"). */
 	private String gameShortName() {
-		return isBlazBlue() ? "BlazBlue" : isKof() ? "The King of Fighters" : "Guilty Gear XX ΛC+";
+		return isBlazBlue() ? "BlazBlue" : isKof() ? "The King of Fighters" : isStreetFighter() ? "Street Fighter Alpha 3" : "Guilty Gear XX ΛC+";
 	}
 
 	private void refreshHeader() {
@@ -1170,6 +1235,12 @@ public class LauncherActivity extends Activity {
 			boolean portable = t != null && t.toUpperCase(Locale.ROOT).contains("PORTABLE");
 			headerKicker.setText("THE KING OF FIGHTERS");
 			headerTitle.setText(portable ? "PORTABLE '94~'98" : "OROCHI SAGA");
+			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
+		} else if (isStreetFighter()) {
+			String t = prefs.getString(K_TITLE, "");
+			boolean zero = t != null && t.toUpperCase(Locale.ROOT).contains("ZERO");
+			headerKicker.setText("STREET FIGHTER");
+			headerTitle.setText(zero ? "ZERO 3 ↑↑" : "ALPHA 3 MAX");
 			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
 		} else {
 			headerKicker.setText("GUILTY GEAR XX");
@@ -1309,8 +1380,10 @@ public class LauncherActivity extends Activity {
 			"Botones arcade A B C D, gestos (cadena A → B → C, Drive con ✕), HUD propio (vida, Heat y combos) y perfiles por personaje (experimental; CT americano y europeo, CS II americano), efectos y FSR." },
 		{ "The King of Fighters Collection: The Orochi Saga", "ULUS-10360 · ULES-01191",
 			"Botones Neo Geo A B C D, gestos (cadena A → B → C → D, CD, Roll y MAX), HUD propio (vida, POW y tiempo) en las cinco entregas, perfiles por personaje en '96, '97 y '98 (versión americana), efectos y FSR." },
+		{ "Street Fighter Alpha 3 MAX", "ULUS-10062 · ULES-00235 · ULJM-05082 (Zero 3 Double Upper)",
+			"Botones arcade de 6 (LP MP HP / LK MK HK), gestos (cadena LP → MP → HP, V-ISM y Alpha Counter), HUD propio (vida, súper, guardia y tiempo), efectos y FSR. Sin perfiles por personaje por ahora." },
 	};
-	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF };
+	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF, GameCatalog.BADGE_SF };
 
 	/** ImageView with the shape of a PSP game icon (144 x 80). */
 	private static final class IconView extends ImageView {
@@ -1450,9 +1523,10 @@ public class LauncherActivity extends Activity {
 			chips.setOrientation(LinearLayout.HORIZONTAL);
 			hs.addView(chips);
 			addFilterChip(chips, -1, "Todos · " + total);
-			for (int b = 0; b < counts.length; b++) {
+			for (int b : GameCatalog.BADGE_ORDER) {
 				if (counts[b] > 0) {
-					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF" : "Otros") + " · " + counts[b]);
+					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF"
+						: b == GameCatalog.BADGE_SF ? "Street Fighter" : "Otros") + " · " + counts[b]);
 				}
 			}
 			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1929,6 +2003,12 @@ public class LauncherActivity extends Activity {
 			s.append("En BlazBlue la app reconoce a tu personaje por los nombres de sus sprites en la memoria del juego (experimental).\n\n");
 		} else if (kind == GameInspector.KIND_KOF) {
 			s.append("En KOF funciona en '96, '97 y '98: los botones cambian cuando entra el siguiente miembro de tu equipo. En '94 y '95 se usa el tipo de botones general.\n\n");
+		} else if (kind == GameInspector.KIND_SF) {
+			s.append("Con Street Fighter Alpha 3 todavía no: no se sabe en qué parte de la memoria guarda el juego qué personaje usas, así que se usa siempre el tipo de botones general. "
+				+ "Si juegas un par de combates con esto activado y mandas el informe del juego (abajo), con él se puede encontrar.\n\n");
+		}
+		if (perCharacterButton != null) {
+			perCharacterButton.setVisibility(roster.keys.length == 0 ? View.GONE : View.VISIBLE);
 		}
 		if (gameReportButton != null) {
 			gameReportButton.setVisibility(kind == GameInspector.KIND_GG ? View.GONE : View.VISIBLE);
@@ -1964,6 +2044,8 @@ public class LauncherActivity extends Activity {
 			desc = "En BlazBlue: vida, Heat y combos (los golpes se cuentan por las bajadas de vida). Los nombres salen cuando la app reconoce al personaje; BlazBlue no tiene tiempo en el HUD propio.\n\n" + desc;
 		} else if (kind == GameInspector.KIND_KOF) {
 			desc = "En KOF: vida, POW o POWER con sus stocks, y tiempo. Los combos se cuentan por las bajadas de vida y los nombres salen en '96, '97 y '98.\n\n" + desc;
+		} else if (kind == GameInspector.KIND_SF) {
+			desc = "En Street Fighter Alpha 3: vida, barra de súper, guardia y tiempo. Los combos se cuentan por las bajadas de vida; sin nombres (no se sabe dónde guarda el personaje).\n\n" + desc;
 		}
 		hudDesc.setText(desc);
 		int alpha = prefs.getInt(K_HUD_ALPHA, 100);
@@ -2292,12 +2374,17 @@ public class LauncherActivity extends Activity {
 
 	/** A special move button's input: chosen in the launcher, or the character's default. */
 	private static String gestureKey(int id, int slot) {
-		return K_GES_MOVE + (id == GESTURE_BB ? "bb" : id == GESTURE_KOF ? "kof" : String.valueOf(id)) + "_" + slot;
+		return K_GES_MOVE + (id == GESTURE_BB ? "bb" : id == GESTURE_KOF ? "kof" : id == GESTURE_SF ? "sf" : String.valueOf(id)) + "_" + slot;
+	}
+
+	/** The button names a game's moves are written with. */
+	private static String[] gestureButtons(int id) {
+		return id == GESTURE_SF ? GestureMoves.BUTTONS_SF : id < 0 ? GestureMoves.BUTTONS_BB : GestureMoves.BUTTONS_GG_SPLIT;
 	}
 
 	private String gestureMove(int id, int slot) {
 		String custom = prefs.getString(gestureKey(id, slot), null);
-		if (GestureMoves.valid(custom, id < 0)) {
+		if (GestureMoves.validWith(custom, gestureButtons(id))) {
 			return custom;
 		}
 		return gestureDefault(id, slot);
@@ -2310,11 +2397,14 @@ public class LauncherActivity extends Activity {
 		if (id == GESTURE_KOF) {
 			return GestureMoves.GENERIC_KOF[slot];
 		}
+		if (id == GESTURE_SF) {
+			return GestureMoves.GENERIC_SF[slot];
+		}
 		return id == 0 ? GestureMoves.GENERIC[slot] : GestureMoves.defaultMove(id, slot);
 	}
 
 	private String gestureCharName(int id) {
-		return id == GESTURE_BB ? "BlazBlue" : id == GESTURE_KOF ? "KOF" : id == 0 ? "General" : CHARACTERS[id];
+		return id == GESTURE_BB ? "BlazBlue" : id == GESTURE_KOF ? "KOF" : id == GESTURE_SF ? "Street Fighter" : id == 0 ? "General" : CHARACTERS[id];
 	}
 
 	private void refreshGestures() {
@@ -2334,13 +2424,15 @@ public class LauncherActivity extends Activity {
 		styleChip(gestureSide2p, side == 1);
 		final boolean bb = isBlazBlue();
 		final boolean kof = isKof();
-		final boolean letters = bb || kof;
-		final int shown = bb ? GESTURE_BB : kof ? GESTURE_KOF : gestureChar;
-		gestureGuide.setText(bb ? GESTURE_GUIDE_BB : kof ? GESTURE_GUIDE_KOF : GESTURE_GUIDE);
-		gestureCharButton.setText(letters ? gameShortName() + " · los mismos para todos los personajes" : "Personaje: " + gestureCharName(gestureChar) + "  ▾");
-		gestureCharButton.setEnabled(!letters);
-		gestureMovesNote.setText(letters
-			? "En " + gameShortName() + " los cuatro botones son los mismos con cualquier personaje (la app no lee qué personaje usas). Toca uno para cambiar su movimiento: 236 = ↓↘→, y los botones son A, B, C y D."
+		final boolean sf = isStreetFighter();
+		final boolean oneSet = bb || kof || sf;
+		final int shown = bb ? GESTURE_BB : kof ? GESTURE_KOF : sf ? GESTURE_SF : gestureChar;
+		gestureGuide.setText(bb ? GESTURE_GUIDE_BB : kof ? GESTURE_GUIDE_KOF : sf ? GESTURE_GUIDE_SF : GESTURE_GUIDE);
+		gestureCharButton.setText(oneSet ? gameShortName() + " · los mismos para todos los personajes" : "Personaje: " + gestureCharName(gestureChar) + "  ▾");
+		gestureCharButton.setEnabled(!oneSet);
+		gestureMovesNote.setText(oneSet
+			? "En " + gameShortName() + " los cuatro botones son los mismos con cualquier personaje (la app no lee qué personaje usas). Toca uno para cambiar su movimiento: 236 = ↓↘→, "
+				+ (sf ? "[4]6 = carga ← y luego →, y los botones son LP, MP, HP, LK, MK y HK." : "y los botones son A, B, C y D.")
 			: "Los botones cambian solos según tu personaje (versión ULUS-10409). Toca uno para cambiar su movimiento: la notación es la de los números del teclado, mirando a la derecha (236 = ↓↘→).");
 
 		gestureMoveRows.removeAllViews();
@@ -2356,7 +2448,7 @@ public class LauncherActivity extends Activity {
 			makeClickable(row);
 			String slotName = gestureSlotName(shown, slot);
 			row.addView(text(slotName + "  ·  " + move, 15, C_TEXT, true));
-			String detail = GestureMoves.arrows(move, letters) + (name != null ? "  ·  " + name : custom ? "  ·  elegido por ti" : "");
+			String detail = GestureMoves.arrowsWith(move, gestureButtons(shown)) + (name != null ? "  ·  " + name : custom ? "  ·  elegido por ti" : "");
 			row.addView(text(detail, 13, C_MUTED, false));
 			row.setOnClickListener(v -> showMotionPicker(shown, s));
 			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2406,8 +2498,9 @@ public class LauncherActivity extends Activity {
 	private void showButtonPicker(int id, int slot, String motion) {
 		new AlertDialog.Builder(this)
 			.setTitle((motion.isEmpty() ? "" : GestureMoves.arrows(motion) + " + ") + "¿qué botón?")
-			.setItems(id == GESTURE_BB ? GestureMoves.BUTTON_NAMES_BB : id == GESTURE_KOF ? GestureMoves.BUTTON_NAMES_KOF : GestureMoves.BUTTON_NAMES, (d, which) -> {
-				String button = (id < 0 ? GestureMoves.BUTTONS_BB : GestureMoves.BUTTONS)[which];
+			.setItems(id == GESTURE_BB ? GestureMoves.BUTTON_NAMES_BB : id == GESTURE_KOF ? GestureMoves.BUTTON_NAMES_KOF
+				: id == GESTURE_SF ? GestureMoves.BUTTON_NAMES_SF : GestureMoves.BUTTON_NAMES, (d, which) -> {
+				String button = (id == GESTURE_SF ? GestureMoves.BUTTONS_SF : id < 0 ? GestureMoves.BUTTONS_BB : GestureMoves.BUTTONS)[which];
 				prefs.edit().putString(gestureKey(id, slot), motion + button).apply();
 				refreshGestures();
 			})
@@ -2421,6 +2514,9 @@ public class LauncherActivity extends Activity {
 		}
 		if (slot == 3 && id == GESTURE_KOF) {
 			return "Súper";
+		}
+		if (slot == 3 && id == GESTURE_SF) {
+			return "Super Combo";
 		}
 		return GestureMoves.SLOT_NAMES[slot];
 	}
@@ -2801,7 +2897,12 @@ public class LauncherActivity extends Activity {
 		int kind = gameKind();
 		boolean bb = kind == GameInspector.KIND_BB;
 		controlsPreview.setKind(kind);
-		if (kind == GameInspector.KIND_KOF) {
+		if (kind == GameInspector.KIND_SF) {
+			styleDesc.setText(arcade
+				? "Como en la máquina de Capcom: LP, MP y HP arriba; LK, MK y HK abajo. La cruceta, el stick, Start y Select siguen ahí. Pulsan □ = LP, △ = MP, R = HP, ✕ = LK, ○ = MK y L = HK: si un botón no hace el golpe que dice, pon esa configuración en las opciones del juego."
+				: "Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. Los golpes son los que tenga el juego en su configuración de botones.");
+			padNote.setText("Los controles funcionan solos: X = □, Y = △, A = ✕, B = ○, R1 = R y L1 = L. Qué golpe es cada uno lo decide la configuración de botones del juego.");
+		} else if (kind == GameInspector.KIND_KOF) {
 			styleDesc.setText(arcade
 				? "Como en la máquina Neo Geo: A, B, C y D en arco. La cruceta, el stick, L, R, Start y Select siguen ahí."
 				: "Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. En KOF: □ = A, ✕ = B, △ = C, ○ = D.");
@@ -3190,7 +3291,7 @@ public class LauncherActivity extends Activity {
 		gestureMoveRows.setOrientation(LinearLayout.VERTICAL);
 		gestureOptions.addView(gestureMoveRows);
 		TextView resetMoves = outlineButton("Restablecer este personaje");
-		resetMoves.setOnClickListener(v -> confirmResetGestureMoves(isBlazBlue() ? GESTURE_BB : isKof() ? GESTURE_KOF : gestureChar));
+		resetMoves.setOnClickListener(v -> confirmResetGestureMoves(isBlazBlue() ? GESTURE_BB : isKof() ? GESTURE_KOF : isStreetFighter() ? GESTURE_SF : gestureChar));
 		LinearLayout.LayoutParams resetMovesParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		resetMovesParams.topMargin = dp(12);
 		gestureOptions.addView(resetMoves, resetMovesParams);
@@ -3237,6 +3338,7 @@ public class LauncherActivity extends Activity {
 		profilesOptions.addView(profilesStatus);
 		TextView perCharacter = outlineButton("Elegir botones por personaje");
 		perCharacter.setOnClickListener(v -> showCharacterList());
+		perCharacterButton = perCharacter;
 		profilesOptions.addView(perCharacter, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 		TextView reset = outlineButton("Restablecer todos");
 		reset.setOnClickListener(v -> confirmResetProfiles());
@@ -3248,7 +3350,7 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams reportParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		reportParams.topMargin = dp(8);
 		profilesOptions.addView(gameReportButton, reportParams);
-		TextView profileNote = text("Al empezar el combate verás «Controles: nombre». Funciona con Guilty Gear XX ΛC+ (versión americana, combates individuales), BlazBlue (experimental) y KOF '96, '97 y '98. Cada juego tiene su propia lista de personajes.", 13, C_MUTED, false);
+		TextView profileNote = text("Al empezar el combate verás «Controles: nombre». Funciona con Guilty Gear XX ΛC+ (versión americana, combates individuales), BlazBlue (experimental) y KOF '96, '97 y '98. Cada juego tiene su propia lista de personajes. En Street Fighter Alpha 3 todavía no.", 13, C_MUTED, false);
 		profileNote.setPadding(0, dp(12), 0, 0);
 		profilesOptions.addView(profileNote);
 
@@ -3391,7 +3493,7 @@ public class LauncherActivity extends Activity {
 		// Custom HUD (UI/AcPlusHud.h)
 		LinearLayout hud = section(col, "HUD PROPIO");
 		hudSwitch = switchRow(hud, "Mostrar mi HUD",
-			"Barras de vida, el medidor de poder (tensión, Heat o POW) y contador de combos con su daño, leídos de la memoria del juego y dibujados encima. Guilty Gear, BlazBlue y KOF.");
+			"Barras de vida, el medidor de poder (tensión, Heat, POW o súper) y contador de combos con su daño, leídos de la memoria del juego y dibujados encima. Guilty Gear, BlazBlue, KOF y Street Fighter Alpha 3.");
 		hudSwitch.setOnCheckedChangeListener((b, checked) -> {
 			prefs.edit().putBoolean(K_HUD_ON, checked).apply();
 			refreshHud();

@@ -329,11 +329,94 @@ static void TestEstimatedCombos() {
 	Expect("estimate: after a new round, damage counts from full health", tr.p[0].comboHits == 2 && tr.p[0].comboDamage == 600, std::to_string(tr.p[0].comboDamage));
 }
 
+// ---------------------------------------------------------------------------------------------
+
+static void TestStreetFighter(SimMem &m) {
+	using namespace SF;
+	auto setup = [&](u32 h, u32 timer) {
+		for (int p = 0; p < 2; p++) {
+			m.W16(h + p * kStride, (u16)(p == 0 ? 0x90 : 0x48));
+			m.W8(h + p * kStride + kSuper, (u8)(p == 0 ? 0x48 : 0x90));
+			m.W16(h + p * kStride + kGuard, 0x3C);
+		}
+		m.W8(timer, 75);
+	};
+	int frame = 0;
+	auto animate = [&](u32 h) { m.W8(h + 0x40, (u8)++frame); };
+
+	m.Clear();
+	setup(0x092E3F10, 0x092E1231);
+	Reader us;
+	us.Init("ULUS-10062");
+	animate(0x092E3F10);
+	Snapshot s;
+	Expect("SF US: supported, read ok", us.GetTitle() == TITLE_SF && us.Read(m, 0, &s));
+	Expect("SF US: CWCheat addresses (P2 health and guard 0x498 later)",
+		0x092E3F10 + kStride == 0x092E43A8 && 0x092E3F10 + kStride + kGuard == 0x092E4564 && 0x092E3F10 + kSuper == 0x092E400E);
+	Expect("SF US: health, super half / full, guard full, timer 75",
+		s.health[0] == 0x90 && s.healthMax[0] == 0x90 && s.health[1] == 0x48 && s.meter[0] == 0.5f && s.meter[1] == 1.0f && s.gauge[0] == 1.0f && s.timer == 75,
+		std::to_string(s.timer));
+	Expect("SF US: style SUPER / GUARD with timer, no names", std::string(s.style->meter) == "SUPER" && std::string(s.style->gauge) == "GUARD" && s.name[0].empty());
+	Fighter f;
+	Expect("SF: no profiles (character unknown)", !us.PlayerFighter(m, 0, 0, &f));
+	// Blocking empties the guard; a new round fills it with another length.
+	m.W16(0x092E3F10 + kGuard, 0x1E);
+	animate(0x092E3F10);
+	us.Read(m, 0.1, &s);
+	Expect("SF: guard half after blocking", s.gauge[0] == 0.5f, std::to_string(s.gauge[0]));
+	m.W16(0x092E3F10, 0x20);
+	animate(0x092E3F10);
+	us.Read(m, 0.2, &s);
+	m.W16(0x092E3F10, 0x90);
+	m.W16(0x092E3F10 + kGuard, 0x50);
+	animate(0x092E3F10);
+	us.Read(m, 0.3, &s);
+	Expect("SF: new round, longer guard = full", s.gauge[0] == 1.0f, std::to_string(s.gauge[0]));
+	m.W16(0x092E3F10, 999);
+	animate(0x092E3F10);
+	us.Read(m, 0.4, &s);
+	Expect("SF: health above 0x90 (World Tour): the maximum follows", s.healthMax[0] == 999 && s.health[0] == 999);
+	m.W8(0x092E1231, 0xFF);
+	animate(0x092E3F10);
+	us.Read(m, 0.5, &s);
+	Expect("SF: timer out of range shown as --", s.timer == AcHud::kTimerUnknown);
+	m.W16(0x092E3F10 + kStride, 5000);
+	Expect("SF: impossible health: not valid", !us.Read(m, 1.0, &s));
+	std::string rep;
+
+	// JP: 0x680 earlier.
+	m.Clear();
+	setup(0x092E3890, 0x092E0BB1);
+	Reader jp;
+	jp.Init("ULJM05082");
+	animate(0x092E3890);
+	Expect("SF JP: read at its own addresses", jp.Read(m, 0, &s) && s.health[1] == 0x48 && s.timer == 75);
+
+	// EU: the fight at the US addresses, garbage at the other place.
+	m.Clear();
+	setup(0x092E3F10, 0x092E1231);
+	m.W16(0x09303F10, 0xFFFF);
+	Reader eu;
+	eu.Init("ULES-00235");
+	animate(0x092E3F10);
+	Expect("SF EU: fight at the US addresses", eu.Read(m, 0, &s) && s.health[1] == 0x48, std::to_string(eu.SfPlace(m, 0)));
+	m.Clear();
+	setup(0x09303F10, 0x09301231);
+	m.W16(0x092E3F10, 0xFFFF);
+	Reader eu2;
+	eu2.Init("ULES00235");
+	animate(0x09303F10);
+	Expect("SF EU: fight 0x20000 later", eu2.Read(m, 0, &s) && s.health[1] == 0x48 && eu2.SfPlace(m, 0) == 0);
+	rep = eu2.Report(m, 0.1);
+	Expect("SF: report dumps both fighters", rep.find("P1 data from") != std::string::npos && rep.find("P2 data from") != std::string::npos);
+}
+
 int main() {
 	SimMem m;
 	TestGuiltyGear(m);
 	TestBlazBlue(m);
 	TestKof(m);
+	TestStreetFighter(m);
 	TestEstimatedCombos();
 	printf("failures: %d\n", failures);
 	return failures;

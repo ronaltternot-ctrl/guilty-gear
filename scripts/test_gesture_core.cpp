@@ -22,6 +22,7 @@ static std::string Name(u32 m) {
 	if (m & BTN_S) s += "+S";
 	if (m & BTN_HS) s += "+HS";
 	if (m & BTN_D) s += "+Dust";
+	if (m & PSP_LTRIGGER) s += "+Ltrig";
 	if (m & PSP_START) s += "+Start";
 	return s;
 }
@@ -75,6 +76,7 @@ struct Rig {
 		b.action = ACT_SPECIAL2; b.x = 760; b.y = 280; buttons.push_back(b);
 		b.action = ACT_OVERDRIVE; b.x = 760; b.y = 140; buttons.push_back(b);
 		b.action = ACT_RC; b.x = 690; b.y = 40; b.r = 20; buttons.push_back(b);
+		b.action = ACT_BURST; b.x = 740; b.y = 40; buttons.push_back(b);
 		b.action = ACT_START; b.x = 40; b.y = 40; buttons.push_back(b);
 		std::vector<Zone> zones = { Zone{ 400, 30, 30 } };
 		rec.SetLayout(buttons, zones);
@@ -258,6 +260,42 @@ int main() {
 		r.Down(0, 690, 40); r.Up(0, 690, 40);
 		Expect("KOF: small button = roll A+B", Run(r.seq, 4), "+P+K*2 .*2");
 		Expect("KOF: move letters", ParseMotion("214D", &kof).buttons == PSP_CIRCLE ? "ok" : "bad", "ok");
+	}
+	{
+		// Street Fighter Alpha 3: square LP, triangle MP, R HP, cross LK, circle MK, L HK.
+		Rig r;
+		const ButtonMap sf = StreetFighterMap();
+		r.rec.SetButtonMap(sf);
+		r.rec.SetMove(0, ParseMotion("236HP", &sf));
+		r.rec.SetMove(3, ParseMotion("[4]6LK", &sf));
+		r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		r.Wait(0.2); r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		r.Wait(0.2); r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		r.Wait(0.2); r.Down(0, 300, 250); r.Wait(0.05); r.Up(0, 300, 250);
+		Expect("SF: chain LP, MP, HP, then LP again", Run(r.seq, 16), "+P*3 . +S*3 . +Dust*3 . +P*3 .");
+		r.Wait(1.0);
+		r.Down(0, 300, 250); r.Wait(0.03); r.Down(1, 360, 250); r.Wait(0.05); r.Up(0, 300, 250); r.Up(1, 360, 250);
+		Expect("SF: two-finger tap = HK (L)", Run(r.seq, 5), "+Ltrig*3 .*2");
+		r.Wait(0.3);
+		r.Down(0, 300, 250); r.Down(1, 360, 250); r.Wait(0.05); r.Move(0, 345, 250); r.Move(1, 405, 250);
+		Expect("SF: two-finger swipe right = throw, forward + HP", Run(r.seq, 6), "R R+Dust*3 .*2");
+		r.Up(0, 345, 250); r.Up(1, 405, 250);
+		r.Down(0, 300, 250); r.Wait(0.03); r.Move(0, 303, 300); r.Up(0, 303, 300);
+		Expect("SF: swipe down = sweep 2HK", Run(r.seq, 6), "D D+Ltrig*3 .*2");
+		r.Down(0, 760, 350); r.Up(0, 760, 350);
+		Expect("SF: button 236HP", Run(r.seq, 9, true), "D*2 DR*2 R+Dust*3 .*2");
+		r.Down(0, 690, 40); r.Up(0, 690, 40);
+		Expect("SF: small button = V-ism, MP+MK", Run(r.seq, 4), "+S+HS*2 .*2");
+		// Alpha Counter while blocking with two fingers: forward replaces back.
+		r.Down(1, 200, 250); r.Down(2, 260, 250); r.Wait(0.3);
+		Run(r.seq, 20);
+		r.Down(0, 740, 40); r.Up(0, 740, 40);
+		Expect("SF: Alpha button while blocking = forward + MP+MK", Run(r.seq, 4), "R+S+HS*2 L*2");
+		r.Up(1, 200, 250); r.Up(2, 260, 250);
+		Run(r.seq, 5);
+		Expect("SF: names LP MP HP LK MK HK", ParseMotion("214LKMKHK", &sf).buttons == (PSP_CROSS | PSP_CIRCLE | PSP_LTRIGGER) ? "ok" : "bad", "ok");
+		Expect("SF: GG names are not SF buttons", ParseMotion("236P", &sf).valid ? "valid" : "invalid", "invalid");
+		Expect("SF: charge motion", ParseMotion("[2]8MK", &sf).valid && ParseMotion("[2]8MK", &sf).charge == 2 ? "ok" : "bad", "ok");
 	}
 	printf("failures: %d\n", failures);
 	return failures;

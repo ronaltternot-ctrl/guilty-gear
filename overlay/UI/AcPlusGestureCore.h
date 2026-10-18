@@ -1,6 +1,7 @@
 // GGXX AC+ launcher build: touch gestures in the style of Skullgirls Mobile.
 //
-// Buttons are Guilty Gear's (P K S HS D), BlazBlue's or KOF's (A B C D): see ButtonMap.
+// Buttons are Guilty Gear's (P K S HS D), BlazBlue's or KOF's (A B C D) or Street Fighter Alpha 3's
+// (LP MP HP LK MK HK): see ButtonMap.
 //
 //   Tap ........................ attack chain P -> K -> S -> HS (taps close together)
 //   Swipe left / right ......... dash / back dash (keep the finger down to keep running)
@@ -60,8 +61,9 @@ const u32 kAttacks = BTN_P | BTN_K | BTN_S | BTN_HS | BTN_D;
 const u32 REL_FORWARD = 1u << 30;
 const u32 REL_BACK = 1u << 29;
 
-// Every button this module may press (it only releases what it pressed itself).
-const u32 kOwned = kDirs | kAttacks | PSP_START;
+// Every button this module may press (it only releases what it pressed itself). L is Street
+// Fighter Alpha 3's heavy kick.
+const u32 kOwned = kDirs | kAttacks | PSP_LTRIGGER | PSP_START;
 
 // What each gesture presses, per game.
 struct ButtonMap {
@@ -79,12 +81,17 @@ struct ButtonMap {
 	const char *burstName;
 	bool letters;             // moves are written with A B C D (not P K S HS D)
 	u32 letter[4];            // PSP buttons for A, B, C, D
+	// Other button names (Street Fighter: LP MP HP LK MK HK); 0 = use the ones above.
+	int tokenCount;
+	const char *tokenNames[6];
+	u32 tokenButtons[6];
 };
 
 // Guilty Gear (PSP defaults): square P, cross K, triangle S, circle HS, R Dust.
 inline ButtonMap GuiltyGearMap() {
 	return ButtonMap{ { BTN_P, BTN_K, BTN_S, BTN_HS }, 4, { "P", "K", "S", "HS" },
-		BTN_D, "D", BTN_D, "2D", BTN_HS, BTN_P | BTN_K | BTN_S, BTN_D | BTN_HS, "RC", "Burst", false, { 0, 0, 0, 0 } };
+		BTN_D, "D", BTN_D, "2D", BTN_HS, BTN_P | BTN_K | BTN_S, BTN_D | BTN_HS, "RC", "Burst", false, { 0, 0, 0, 0 },
+		0, {}, {} };
 }
 
 // BlazBlue (PSP defaults): square A, triangle B, circle C, cross D (Drive).
@@ -93,7 +100,7 @@ inline ButtonMap BlazBlueMap() {
 	return ButtonMap{ { PSP_SQUARE, PSP_TRIANGLE, PSP_CIRCLE, 0 }, 3, { "A", "B", "C", "" },
 		PSP_CROSS, "D", PSP_CIRCLE, "2C", PSP_TRIANGLE | PSP_CIRCLE,
 		PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE, PSP_SQUARE | PSP_TRIANGLE | PSP_CIRCLE | PSP_CROSS, "RC", "Burst",
-		true, { PSP_SQUARE, PSP_TRIANGLE, PSP_CIRCLE, PSP_CROSS } };
+		true, { PSP_SQUARE, PSP_TRIANGLE, PSP_CIRCLE, PSP_CROSS }, 0, {}, {} };
 }
 
 // The King of Fighters (SNK's PlayStation default): square A (weak punch), cross B (weak kick),
@@ -103,7 +110,20 @@ inline ButtonMap KofMap() {
 	return ButtonMap{ { PSP_SQUARE, PSP_CROSS, PSP_TRIANGLE, PSP_CIRCLE }, 4, { "A", "B", "C", "D" },
 		PSP_TRIANGLE | PSP_CIRCLE, "CD", PSP_CIRCLE, "2D", PSP_TRIANGLE,
 		PSP_SQUARE | PSP_CROSS, PSP_SQUARE | PSP_CROSS | PSP_TRIANGLE, "Roll", "MAX",
-		true, { PSP_SQUARE, PSP_CROSS, PSP_TRIANGLE, PSP_CIRCLE } };
+		true, { PSP_SQUARE, PSP_CROSS, PSP_TRIANGLE, PSP_CIRCLE }, 0, {}, {} };
+}
+
+// Street Fighter Alpha 3 MAX, with the buttons set as the launcher's arcade layout uses them:
+// square LP, triangle MP, R HP, cross LK, circle MK, L HK. Taps chain LP -> MP -> HP, two
+// fingers = HK, swipe down = sweep (2HK), throw = forward + HP. Small buttons: MP+MK (V-ism
+// Custom Combo) and forward + MP+MK (Alpha Counter while blocking).
+inline ButtonMap StreetFighterMap() {
+	return ButtonMap{ { PSP_SQUARE, PSP_TRIANGLE, PSP_RTRIGGER, 0 }, 3, { "LP", "MP", "HP", "" },
+		PSP_LTRIGGER, "HK", PSP_LTRIGGER, "2HK", PSP_RTRIGGER,
+		PSP_TRIANGLE | PSP_CIRCLE, REL_FORWARD | PSP_TRIANGLE | PSP_CIRCLE, "V-ISM", "Alpha",
+		false, { 0, 0, 0, 0 },
+		6, { "LP", "MP", "HP", "LK", "MK", "HK" },
+		{ PSP_SQUARE, PSP_TRIANGLE, PSP_RTRIGGER, PSP_CROSS, PSP_CIRCLE, PSP_LTRIGGER } };
 }
 
 inline u32 CancelOpposites(u32 m) {
@@ -149,9 +169,11 @@ struct Motion {
 	bool valid = false;
 };
 
-// With a map that uses letters (BlazBlue, KOF), buttons are A B C D; otherwise P K S HS D.
+// With a map that uses letters (BlazBlue, KOF), buttons are A B C D; with one that has its own
+// names (Street Fighter), those; otherwise P K S HS D.
 inline Motion ParseMotion(const std::string &spec, const ButtonMap *map = nullptr) {
 	const bool letters = map && map->letters;
+	const bool tokens = map && map->tokenCount > 0;
 	Motion m;
 	std::string s;
 	for (char c : spec) {
@@ -170,6 +192,21 @@ inline Motion ParseMotion(const std::string &spec, const ButtonMap *map = nullpt
 		i++;
 	}
 	while (i < s.size()) {
+		if (tokens) {
+			bool found = false;
+			for (int k = 0; k < map->tokenCount && k < 6; k++) {
+				const std::string name = map->tokenNames[k];
+				if (!name.empty() && s.compare(i, name.size(), name) == 0) {
+					m.buttons |= map->tokenButtons[k];
+					i += name.size();
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+				return m;   // invalid
+			continue;
+		}
 		if (letters) {
 			if (s[i] < 'A' || s[i] > 'D')
 				return m;   // invalid
@@ -754,7 +791,13 @@ private:
 			AddFx(FX_BUTTON, b.x, b.y, 0, 0, map_.rapidCancelName, t);
 			break;
 		case ACT_BURST:
-			seq_->Push(PressSteps(map_.burst, 2));
+			if (map_.burst & (REL_FORWARD | REL_BACK)) {
+				// With a direction (Street Fighter's Alpha Counter: forward + P+K while blocking):
+				// that direction replaces the one held for blocking.
+				seq_->Push({ Step{ map_.burst, 2, true, 0 }, Step{ 0, 1, false, 0 } });
+			} else {
+				seq_->Push(PressSteps(map_.burst, 2));
+			}
 			AddFx(FX_BUTTON, b.x, b.y, 0, 0, map_.burstName, t);
 			break;
 		case ACT_START:

@@ -66,10 +66,13 @@ final class GameRosters {
 			"Shingo Yabuki", "Kasumi Todo ('96)", "Geese Howard ('96)", "Wolfgang Krauser ('96)", "Mr. Big ('96)", "Goenitz ('96)",
 			"Orochi Iori ('97)", "Orochi Leona ('97)", "Orochi ('97)" });
 
+	/** Street Fighter Alpha 3: where the game keeps the character is not known yet. */
+	static final Roster SF = new Roster(new String[0], new String[0]);
+
 	static final Roster[] ALL = { GG, BB, KOF };
 
 	static Roster forKind(int kind) {
-		return kind == GameInspector.KIND_BB ? BB : kind == GameInspector.KIND_KOF ? KOF : GG;
+		return kind == GameInspector.KIND_BB ? BB : kind == GameInspector.KIND_KOF ? KOF : kind == GameInspector.KIND_SF ? SF : GG;
 	}
 
 	private static String norm(String id) {
@@ -77,7 +80,7 @@ final class GameRosters {
 	}
 
 	/** Disc IDs whose memory the HUD and the profiles know. */
-	private static final String[] MEMORY_IDS = { "ULUS10409", "ULUS10519", "ULES01497", "ULUS10579", "ULUS10360" };
+	private static final String[] MEMORY_IDS = { "ULUS10409", "ULUS10519", "ULES01497", "ULUS10579", "ULUS10360", "ULUS10062", "ULES00235", "ULJM05082" };
 
 	static boolean memoryKnown(String discId) {
 		String id = norm(discId);
@@ -96,6 +99,8 @@ final class GameRosters {
 				return "Calamity Trigger americano (ULUS-10519) y europeo (ULES-01497), y Continuum Shift II americano (ULUS-10579)";
 			case GameInspector.KIND_KOF:
 				return "la versión americana (ULUS-10360)";
+			case GameInspector.KIND_SF:
+				return "Alpha 3 MAX americano (ULUS-10062) y europeo (ULES-00235), y Zero 3 Double Upper japonés (ULJM-05082)";
 			default:
 				return "la versión americana (ULUS-10409)";
 		}

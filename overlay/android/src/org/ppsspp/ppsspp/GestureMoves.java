@@ -20,6 +20,9 @@ final class GestureMoves {
 	/** The King of Fighters: one set for every character (A, B, C, D; the last one a super). */
 	static final String[] GENERIC_KOF = { "236A", "623C", "214B", "236236A" };
 
+	/** Street Fighter Alpha 3: one set for every character (Hadoken, Shoryuken, Tatsumaki, super). */
+	static final String[] GENERIC_SF = { "236HP", "623HP", "214HK", "236236HP" };
+
 	/**
 	 * Defaults per character number (1 = Sol ... 25 = Justice, same order as
 	 * LauncherActivity.CHARACTERS): "input|name", or null to use the generic move.
@@ -79,6 +82,10 @@ final class GestureMoves {
 	static final String[] BUTTONS_BB = { "A", "B", "C", "D" };
 	static final String[] BUTTON_NAMES_BB = { "A · débil", "B · medio", "C · fuerte", "D · Drive" };
 	static final String[] BUTTON_NAMES_KOF = { "A · puño débil", "B · patada débil", "C · puño fuerte", "D · patada fuerte" };
+	static final String[] BUTTONS_SF = { "LP", "MP", "HP", "LK", "MK", "HK" };
+	static final String[] BUTTON_NAMES_SF = { "LP · puño débil", "MP · puño medio", "HP · puño fuerte", "LK · patada débil", "MK · patada media", "HK · patada fuerte" };
+	/** Guilty Gear's names, longest first for split(). */
+	static final String[] BUTTONS_GG_SPLIT = { "HS", "P", "K", "S", "D" };
 
 	private static String entry(int id, int slot) {
 		if (id <= 0 || id >= DEFAULTS.length || slot < 0 || slot >= SLOTS || DEFAULTS[id].length <= slot) {
@@ -104,11 +111,15 @@ final class GestureMoves {
 
 	/** Splits "632146HS" into { "632146", "HS" } (BlazBlue: "236A" into { "236", "A" }). */
 	static String[] split(String input, boolean blazblue) {
+		return splitWith(input, blazblue ? BUTTONS_BB : BUTTONS_GG_SPLIT);
+	}
+
+	/** The same with a game's button names ("236236HP" -> { "236236", "HP" }). */
+	static String[] splitWith(String input, String[] buttons) {
 		String button = "";
-		for (String b : blazblue ? BUTTONS_BB : new String[] { "HS", "P", "K", "S", "D" }) {
-			if (input.endsWith(b)) {
+		for (String b : buttons) {
+			if (input.endsWith(b) && b.length() > button.length()) {
 				button = b;
-				break;
 			}
 		}
 		return new String[] { input.substring(0, input.length() - button.length()), button };
@@ -120,7 +131,11 @@ final class GestureMoves {
 
 	/** "236P" -> "↓↘→ + P", "[4]6S" -> "carga ←, → + S". */
 	static String arrows(String input, boolean blazblue) {
-		String[] parts = split(input, blazblue);
+		return arrowsWith(input, blazblue ? BUTTONS_BB : BUTTONS_GG_SPLIT);
+	}
+
+	static String arrowsWith(String input, String[] buttons) {
+		String[] parts = splitWith(input, buttons);
 		String motion = parts[0];
 		StringBuilder out = new StringBuilder();
 		int i = 0;
@@ -160,9 +175,18 @@ final class GestureMoves {
 	}
 
 	static boolean valid(String input, boolean blazblue) {
+		return validWith(input, blazblue ? BUTTONS_BB : BUTTONS_GG_SPLIT);
+	}
+
+	/** Motion digits (or a charge) followed by any number of the game's button names. */
+	static boolean validWith(String input, String[] buttons) {
 		if (input == null || input.isEmpty()) {
 			return false;
 		}
-		return input.matches(blazblue ? "(\\[[1-9]\\][1-9]+|[1-9]*)[ABCD]*" : "(\\[[1-9]\\][1-9]+|[1-9]*)(HS|P|K|S|D)*");
+		StringBuilder alt = new StringBuilder();
+		for (String b : buttons) {
+			alt.append(alt.length() == 0 ? "" : "|").append(b);
+		}
+		return input.matches("(\\[[1-9]\\][1-9]+|[1-9]*)(" + alt + ")*");
 	}
 }

@@ -11,7 +11,8 @@
 // Settings come from acplus.ini, written by the launcher into the app's internal storage.
 // Saved layouts live in <memstick>/PSP/SYSTEM/acplus_profiles/: char_NN.ini (Guilty Gear, by
 // character number), bb_xx.ini (BlazBlue, by sprite code), kof_name.ini (KOF).
-// For BlazBlue and KOF a report of what was read goes to PSP/SYSTEM/acplus_game_report.txt.
+// For BlazBlue, KOF and Street Fighter Alpha 3 a report of what was read goes to
+// PSP/SYSTEM/acplus_game_report.txt (in Street Fighter, to find where it keeps the character).
 //
 // Included only from EmuScreen.cpp.
 
@@ -172,7 +173,7 @@ inline void Apply(const std::string &key) {
 
 inline void WriteReport(const PspMem &m, double t, const std::string &fighter) {
 	State &s = Get();
-	if (s.reader.GetTitle() != AcGame::TITLE_BB && s.reader.GetTitle() != AcGame::TITLE_KOF)
+	if (s.reader.GetTitle() != AcGame::TITLE_BB && s.reader.GetTitle() != AcGame::TITLE_KOF && s.reader.GetTitle() != AcGame::TITLE_SF)
 		return;
 	s.lastReport = t;
 	std::string text = "GGXX AC+ game report\n";

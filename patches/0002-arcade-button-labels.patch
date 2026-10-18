@@ -2,7 +2,7 @@ diff --git a/UI/GamepadEmu.h b/UI/GamepadEmu.h
 index 6b106f6..2f3a546 100644
 --- a/UI/GamepadEmu.h
 +++ b/UI/GamepadEmu.h
-@@ -285,6 +285,12 @@ namespace CustomKeyData {
+@@ -285,6 +285,19 @@ namespace CustomKeyData {
  		{ ImageID("I_ARROW_DOWN"), 0.0f},
  		{ ImageID("I_THREE_DOTS"), 0.0f},
  		{ ImageID("I_EMPTY"), 0.0f},
@@ -12,6 +12,13 @@ index 6b106f6..2f3a546 100644
 +		{ ImageID("I_GG_S"), 0.0f},
 +		{ ImageID("I_GG_HS"), 0.0f},
 +		{ ImageID("I_GG_D"), 0.0f},
++		// Street Fighter Alpha 3 arcade labels (indices 41-46).
++		{ ImageID("I_SF_LP"), 0.0f},
++		{ ImageID("I_SF_MP"), 0.0f},
++		{ ImageID("I_SF_HP"), 0.0f},
++		{ ImageID("I_SF_LK"), 0.0f},
++		{ ImageID("I_SF_MK"), 0.0f},
++		{ ImageID("I_SF_HK"), 0.0f},
  	};
  
  	// Shape list
@@ -19,7 +26,7 @@ diff --git a/UI/UIAtlas.cpp b/UI/UIAtlas.cpp
 index 791c1d8..c5a2e8f 100644
 --- a/UI/UIAtlas.cpp
 +++ b/UI/UIAtlas.cpp
-@@ -197,6 +197,12 @@ static const ImageMeta g_uiImageIDs[] = {
+@@ -197,6 +197,18 @@ static const ImageMeta g_uiImageIDs[] = {
  	{"I_ARCHIVE_ZIP", false},
  	{"I_ARCHIVE_7Z", false},
  	{"I_ARCHIVE_RAR", false},
@@ -29,14 +36,20 @@ index 791c1d8..c5a2e8f 100644
 +	{"I_GG_S", true},
 +	{"I_GG_HS", true},
 +	{"I_GG_D", true},
++	{"I_SF_LP", true},
++	{"I_SF_MP", true},
++	{"I_SF_HP", true},
++	{"I_SF_LK", true},
++	{"I_SF_MK", true},
++	{"I_SF_HK", true},
  };
  
  static std::string PNGNameFromID(std::string_view id) {
-@@ -390,6 +396,8 @@ static bool GenerateUIAtlasImage(Atlas *atlas, float dpiScale, Image *dest, int
+@@ -390,6 +402,8 @@ static bool GenerateUIAtlasImage(Atlas *atlas, float dpiScale, Image *dest, int
  			return false;
  		}
  	}
-+	// P / K / S / HS / D labels for the arcade-style touch layout. Optional: ignore if missing.
++	// P / K / S / HS / D and LP ... HK labels for the arcade-style touch layout. Optional: ignore if missing.
 +	RasterizeSVG("ui_images/gg_buttons.svg", dpiScale, maxTextureSize, imageIDs, imageCount, &images);
  	Instant shadowStart = Instant::Now();
  

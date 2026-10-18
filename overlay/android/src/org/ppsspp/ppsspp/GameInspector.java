@@ -22,21 +22,40 @@ final class GameInspector {
 
 	static final int SECTOR = 2048;
 
-	enum Match { TARGET, BLAZBLUE, KOF, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
+	enum Match { TARGET, BLAZBLUE, KOF, STREET_FIGHTER, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
 
 	/** Games with their own controls in the app. */
 	static final int KIND_GG = 0;
 	static final int KIND_BB = 1;
 	static final int KIND_KOF = 2;
+	static final int KIND_SF = 3;
 
 	static int kind(String discId, String title) {
 		if (isBlazBlue(discId, title)) {
 			return KIND_BB;
 		}
+		if (isStreetFighter(discId, title)) {
+			return KIND_SF;
+		}
 		if (isKof(discId, title)) {
 			return KIND_KOF;
 		}
 		return KIND_GG;
+	}
+
+	/** Street Fighter Alpha 3 MAX (US, EU) / Street Fighter Zero 3 Double Upper (JP). */
+	static boolean isStreetFighter(String discId, String title) {
+		if (discId != null) {
+			String id = discId.replace("-", "").replace(" ", "").toUpperCase(Locale.ROOT);
+			if (id.equals("ULUS10062") || id.equals("ULES00235") || id.equals("ULJM05082")) {
+				return true;
+			}
+		}
+		if (title == null) {
+			return false;
+		}
+		String t = title.toUpperCase(Locale.ROOT);
+		return t.contains("STREET FIGHTER ALPHA 3") || t.contains("STREET FIGHTER ZERO 3");
 	}
 
 	/** The King of Fighters Collection: The Orochi Saga (US, EU), or any title naming KOF. */
@@ -83,6 +102,9 @@ final class GameInspector {
 		Match match() {
 			if (isBlazBlue(discId, title)) {
 				return Match.BLAZBLUE;
+			}
+			if (isStreetFighter(discId, title)) {
+				return Match.STREET_FIGHTER;
 			}
 			if (isKof(discId, title)) {
 				return Match.KOF;

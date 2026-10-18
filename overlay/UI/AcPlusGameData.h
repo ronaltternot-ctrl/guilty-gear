@@ -32,6 +32,16 @@
 //     health code is not), so the timer and team data are looked for at both places and the
 //     one that makes sense is used.
 //   The team member fighting is known in '96, '97 and '98; '94 and '95 only get the HUD.
+//
+// Street Fighter Alpha 3 MAX (CWCheat, base 0x08800000):
+//   US ULUS-10062: P1 health u16 0x092E3F10 (full 0x90), P2 + 0x498 (the "Player 2" health and
+//     guard codes are both 0x498 after player 1's), super meter u8 + 0xFE (full 0x90), guard
+//     u16 + 0x1BC, timer u8 0x092E1231 (seconds, 99).
+//   JP ULJM-05082: health 0x092E3890, timer 0x092E0BB1 (0x680 before the US ones), same offsets.
+//   EU ULES-00235: some codes 0x20000 after the US addresses, others at the US ones: both are
+//     tried and the one that holds a running fight is used.
+//   Who is playing is in no code: no profiles yet. The report dumps both fighters' data so the
+//   character byte can be found.
 
 #pragma once
 
@@ -49,7 +59,7 @@ typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
-enum Title { TITLE_NONE = 0, TITLE_GG = 1, TITLE_BB = 2, TITLE_KOF = 3 };
+enum Title { TITLE_NONE = 0, TITLE_GG = 1, TITLE_BB = 2, TITLE_KOF = 3, TITLE_SF = 4 };
 
 // A character, for the profiles: key names the saved layout ("12" in Guilty Gear, "bb_rg",
 // "kof_kyo"), name is shown on screen.
@@ -442,6 +452,67 @@ inline u32 PickShift(const Mem &m, const Game &g) {
 }  // namespace KOF
 
 // ---------------------------------------------------------------------------------------------
+// Street Fighter Alpha 3 MAX
+
+namespace SF {
+
+struct Place {
+	u32 health;   // player 1's health (player 2: + kStride)
+	u32 timer;
+};
+
+struct Version {
+	const char *discId;
+	const char *label;
+	Place places[2];
+	int placeCount;
+};
+
+static const Version kVersions[] = {
+	{ "ULUS10062", "Street Fighter Alpha 3 MAX (US)", { { 0x092E3F10, 0x092E1231 }, { 0, 0 } }, 1 },
+	{ "ULJM05082", "Street Fighter Zero 3 Double Upper (JP)", { { 0x092E3890, 0x092E0BB1 }, { 0, 0 } }, 1 },
+	{ "ULES00235", "Street Fighter Alpha 3 MAX (EU)", { { 0x09303F10, 0x09301231 }, { 0x092E3F10, 0x092E1231 } }, 2 },
+};
+
+const u32 kStride = 0x498;
+const u32 kSuper = 0xFE;
+const u32 kGuard = 0x1BC;
+const int kFullHealth = 0x90;
+const int kFullSuper = 0x90;
+const int kMaxHealth = 999;     // the CWCheat "v2" health code writes 999
+
+inline const Version *FindVersion(const std::string &discId) {
+	const std::string id = NormalizeId(discId);
+	for (const Version &v : kVersions) {
+		if (id == v.discId)
+			return &v;
+	}
+	return nullptr;
+}
+
+inline const Style &GetStyle() {
+	static const Style style = MakeStyle("SUPER", "Súper", "GUARD", "Guardia", true);
+	return style;
+}
+
+// Health and super of both players are in range.
+inline bool ValuesOk(const Mem &m, const Place &pl) {
+	for (int p = 0; p < 2; p++) {
+		int hp = 0, sup = 0;
+		const u32 h = pl.health + (u32)p * kStride;
+		if (!AcHud::Read16(m, h, &hp) || hp > kMaxHealth || !AcHud::Read8(m, h + kSuper, &sup))
+			return false;
+	}
+	return true;
+}
+
+inline u32 ObjectsHash(const Mem &m, const Place &pl) {
+	return AcHud::Hash(m, pl.health, kStride * 2);
+}
+
+}  // namespace SF
+
+// ---------------------------------------------------------------------------------------------
 // One reader per running game: Init() with the disc ID, then Read() / PlayerFighter().
 
 class Reader {
@@ -450,12 +521,15 @@ public:
 		discId_ = NormalizeId(discId);
 		title_ = TITLE_NONE;
 		bb_ = BB::FindVersion(discId_);
+		sf_ = SF::FindVersion(discId_);
 		if (discId_ == "ULUS10409")
 			title_ = TITLE_GG;
 		else if (bb_)
 			title_ = TITLE_BB;
 		else if (KOF::IsSupported(discId_))
 			title_ = TITLE_KOF;
+		else if (sf_)
+			title_ = TITLE_SF;
 	}
 
 	Title GetTitle() const { return title_; }
@@ -466,6 +540,7 @@ public:
 		case TITLE_GG: return "Guilty Gear XX AC+ (US)";
 		case TITLE_BB: return bb_->label;
 		case TITLE_KOF: return kof_ >= 0 ? KOF::kGames[kof_].label : "KOF Orochi Saga (US)";
+		case TITLE_SF: return sf_->label;
 		default: return "";
 		}
 	}
@@ -513,9 +588,40 @@ public:
 			return ReadBB(m, t, s);
 		case TITLE_KOF:
 			return ReadKof(m, t, s);
+		case TITLE_SF:
+			return ReadSf(m, t, s);
 		default:
 			return false;
 		}
+	}
+
+	// Street Fighter: where the fight is (index in sf_->places, -1 none), checked every 1/30 s.
+	int SfPlace(const Mem &m, double t) {
+		if (title_ != TITLE_SF)
+			return -1;
+		if (t - sfChecked_ < 1.0 / 30.0 && t >= sfChecked_)
+			return sfPlace_;
+		sfChecked_ = t;
+		int live = -1;
+		for (int i = 0; i < sf_->placeCount && i < 2; i++) {
+			const SF::Place &pl = sf_->places[i];
+			if (!SF::ValuesOk(m, pl))
+				continue;
+			const u32 h = SF::ObjectsHash(m, pl);
+			if (h != sfHash_[i]) {
+				sfHash_[i] = h;
+				sfChanged_[i] = t;
+			}
+			if (t - sfChanged_[i] < 2.0 && (live < 0 || i == sfPlace_))
+				live = i;
+		}
+		if (live >= 0)
+			sfPlace_ = live;
+		else if (sfPlace_ >= 0 && !SF::ValuesOk(m, sf_->places[sfPlace_]))
+			sfPlace_ = -1;
+		else if (sfPlace_ < 0 && sf_->placeCount == 1 && SF::ValuesOk(m, sf_->places[0]))
+			sfPlace_ = 0;   // only one place: use it (the HUD hides while nothing moves)
+		return sfPlace_;
 	}
 
 	// The character a player (0 = 1P) is using, for the profiles.
@@ -579,6 +685,40 @@ public:
 				snprintf(line, sizeof(line), "P%d object %08X health %d/%d heat %d character %s\n", p + 1, obj, hp, max, heat, c >= 0 ? BB::kCharacters[c].name : "?");
 				out += line;
 				out += "  sprites: " + (seen.empty() ? std::string("(none found)") : seen) + "\n";
+			}
+		} else if (title_ == TITLE_SF) {
+			const int place = SfPlace(m, t);
+			for (int i = 0; i < sf_->placeCount && i < 2; i++) {
+				const SF::Place &pl = sf_->places[i];
+				int hp1 = -1, hp2 = -1, s1 = -1, s2 = -1, g1 = -1, g2 = -1, tm = -1;
+				AcHud::Read16(m, pl.health, &hp1);
+				AcHud::Read16(m, pl.health + SF::kStride, &hp2);
+				AcHud::Read8(m, pl.health + SF::kSuper, &s1);
+				AcHud::Read8(m, pl.health + SF::kStride + SF::kSuper, &s2);
+				AcHud::Read16(m, pl.health + SF::kGuard, &g1);
+				AcHud::Read16(m, pl.health + SF::kStride + SF::kGuard, &g2);
+				AcHud::Read8(m, pl.timer, &tm);
+				snprintf(line, sizeof(line), "%splace %08X: health %d %d, super %d %d, guard %d %d, timer %d\n",
+					i == place ? "> " : "  ", pl.health, hp1, hp2, s1, s2, g1, g2, tm);
+				out += line;
+			}
+			// Both fighters' data around the health, to find the character byte later.
+			if (place >= 0) {
+				for (int p = 0; p < 2; p++) {
+					const u32 from = sf_->places[place].health + (u32)p * SF::kStride - 0x100;
+					snprintf(line, sizeof(line), "P%d data from %08X:\n", p + 1, from);
+					out += line;
+					for (u32 row = 0; row < 0x598 && m.Valid(from + row, 16); row += 16) {
+						const u8 *b = m.Ptr(from + row);
+						snprintf(line, sizeof(line), "%04X:", row);
+						out += line;
+						for (int k = 0; k < 16; k++) {
+							snprintf(line, sizeof(line), " %02X", b[k]);
+							out += line;
+						}
+						out += "\n";
+					}
+				}
 			}
 		} else if (title_ == TITLE_KOF) {
 			const int running = KofGame(m, t);
@@ -675,9 +815,50 @@ private:
 		return true;
 	}
 
+	bool ReadSf(const Mem &m, double t, Snapshot *s) {
+		const int place = SfPlace(m, t);
+		if (place < 0)
+			return false;
+		const SF::Place &pl = sf_->places[place];
+		for (int p = 0; p < 2; p++) {
+			const u32 h = pl.health + (u32)p * SF::kStride;
+			int sup = 0, guard = 0;
+			if (!AcHud::Read16(m, h, &s->health[p]) || s->health[p] > SF::kMaxHealth || !AcHud::Read8(m, h + SF::kSuper, &sup))
+				return false;
+			// Full health is 0x90 (more only with World Tour stamina or the "v2" health code).
+			sfHealthMax_[p] = std::max(sfHealthMax_[p], std::max(SF::kFullHealth, s->health[p]));
+			s->healthMax[p] = sfHealthMax_[p];
+			s->meter[p] = std::min(1.0f, sup / (float)SF::kFullSuper);
+			// The guard meter's length depends on the character: its value at the start of each
+			// round (full health) is taken as full.
+			if (AcHud::Read16(m, h + SF::kGuard, &guard) && guard <= 0x400) {
+				if (s->health[p] >= SF::kFullHealth && (sfLastHealth_[p] < s->health[p] || guard > sfGuardMax_[p]))
+					sfGuardMax_[p] = std::max(1, guard);
+				sfGuardMax_[p] = std::max(sfGuardMax_[p], guard);
+				s->gauge[p] = sfGuardMax_[p] > 0 ? guard / (float)sfGuardMax_[p] : 0.0f;
+			}
+			sfLastHealth_[p] = s->health[p];
+		}
+		int tm = 0;
+		s->timer = AcHud::Read8(m, pl.timer, &tm) && tm <= 99 ? tm : AcHud::kTimerUnknown;
+		s->objectsHash = sfHash_[place];
+		s->style = &SF::GetStyle();
+		s->valid = true;
+		return true;
+	}
+
 	std::string discId_;
 	Title title_ = TITLE_NONE;
 	const BB::Version *bb_ = nullptr;
+	const SF::Version *sf_ = nullptr;
+	// Street Fighter: where the fight is, running maxima.
+	int sfPlace_ = -1;
+	double sfChecked_ = -100;
+	u32 sfHash_[2] = {};
+	double sfChanged_[2] = { -100, -100 };
+	int sfHealthMax_[2] = { SF::kFullHealth, SF::kFullHealth };
+	int sfGuardMax_[2] = { 1, 1 };
+	int sfLastHealth_[2] = { 0, 0 };
 	// BlazBlue: character found in each object.
 	u32 bbObject_[2] = {};
 	double bbScanned_[2] = { -100, -100 };

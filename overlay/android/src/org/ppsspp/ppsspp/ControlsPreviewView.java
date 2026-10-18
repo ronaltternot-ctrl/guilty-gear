@@ -69,6 +69,7 @@ final class ControlsPreviewView extends View {
 		setContentDescription(arcade
 			? (kind == GameInspector.KIND_BB ? "Vista previa: botones arcade A, B y C arriba, D abajo"
 				: kind == GameInspector.KIND_KOF ? "Vista previa: botones Neo Geo A, B, C y D en arco"
+				: kind == GameInspector.KIND_SF ? "Vista previa: botones Capcom LP, MP y HP arriba, LK, MK y HK abajo"
 				: "Vista previa: botones arcade K, S y HS arriba, P y D abajo")
 			: "Vista previa: botones de PSP triángulo, círculo, equis y cuadrado");
 	}
@@ -123,9 +124,13 @@ final class ControlsPreviewView extends View {
 		fill.setColor(0x55FFFFFF);
 		canvas.drawCircle(left + w * 0.135f, top + h * 0.83f, r * 0.45f, fill);
 
-		// Shoulder buttons. In Guilty Gear's arcade layout R (Dust) becomes the D button.
-		drawShoulder(canvas, left + w * 0.075f, top + h * 0.15f, r, "L");
-		if (!arcade || kind != GameInspector.KIND_GG) {
+		// Shoulder buttons. In Guilty Gear's arcade layout R (Dust) becomes the D button; in
+		// Street Fighter's, L and R are the heavy kick and punch.
+		boolean sfArcade = arcade && kind == GameInspector.KIND_SF;
+		if (!sfArcade) {
+			drawShoulder(canvas, left + w * 0.075f, top + h * 0.15f, r, "L");
+		}
+		if (!sfArcade && (!arcade || kind != GameInspector.KIND_GG)) {
 			drawShoulder(canvas, left + w * 0.925f, top + h * 0.15f, r, "R");
 		}
 
@@ -135,12 +140,16 @@ final class ControlsPreviewView extends View {
 		drawPill(canvas, left + w * (arcade ? 0.56f : 0.64f), pillY, r, "START");
 
 		if (arcade) {
-			boolean letters = kind != GameInspector.KIND_GG;
-			String[] names = letters ? new String[] { "A", "B", "C", "D" } : new String[] { "K", "S", "HS", "P", "D" };
-			int[] colors = kind == GameInspector.KIND_KOF ? new int[] { C_HS, C_D, C_S, C_K }
+			boolean sf = kind == GameInspector.KIND_SF;
+			boolean letters = kind == GameInspector.KIND_BB || kind == GameInspector.KIND_KOF;
+			String[] names = sf ? new String[] { "LP", "MP", "HP", "LK", "MK", "HK" }
+				: letters ? new String[] { "A", "B", "C", "D" } : new String[] { "K", "S", "HS", "P", "D" };
+			int[] colors = sf ? new int[] { C_K, C_K, C_K, C_P, C_P, C_P }
+				: kind == GameInspector.KIND_KOF ? new int[] { C_HS, C_D, C_S, C_K }
 				: letters ? new int[] { C_P, C_S, C_HS, C_D } : new int[] { C_K, C_S, C_HS, C_P, C_D };
 			float[][] positions = kind == GameInspector.KIND_BB ? LauncherActivity.BB_ARCADE_POSITIONS
-				: kind == GameInspector.KIND_KOF ? LauncherActivity.KOF_ARCADE_POSITIONS : LauncherActivity.ARCADE_POSITIONS;
+				: kind == GameInspector.KIND_KOF ? LauncherActivity.KOF_ARCADE_POSITIONS
+				: sf ? LauncherActivity.SF_ARCADE_POSITIONS : LauncherActivity.ARCADE_POSITIONS;
 			for (int i = 0; i < names.length; i++) {
 				float cx = left + w * positions[i][0];
 				float cy = top + h * positions[i][1];

@@ -59,6 +59,16 @@ inline bool IsKof(const std::string &id, const std::string &title) {
 	return t.find("KING OF FIGHTERS") != std::string::npos || t.find("KOF") != std::string::npos;
 }
 
+// Street Fighter Alpha 3 MAX (US, EU) / Street Fighter Zero 3 Double Upper (JP).
+inline bool IsStreetFighter(const std::string &id, const std::string &title) {
+	if (id == "ULUS10062" || id == "ULES00235" || id == "ULJM05082")
+		return true;
+	std::string t;
+	for (char c : title)
+		t += (char)((c >= 'a' && c <= 'z') ? c - 32 : c);
+	return t.find("STREET FIGHTER ALPHA 3") != std::string::npos || t.find("STREET FIGHTER ZERO 3") != std::string::npos;
+}
+
 inline bool IsBlazBlue(const std::string &id) {
 	static const char *const ids[] = { "ULUS10519", "ULES01497", "ULJM05613", "ULUS10579", "ULES01526", "ULJM05850", "UCAS40337" };
 	for (const char *b : ids) {
@@ -79,8 +89,10 @@ struct State {
 	std::string moves[kCharacters + 1][4];
 	std::string movesBlazBlue[4];   // BlazBlue: one set for all characters
 	std::string movesKof[4];        // KOF: one set for all characters
+	std::string movesSf[4];         // Street Fighter Alpha 3: one set for all characters
 	bool blazblue = false;
 	bool kof = false;
+	bool sf = false;
 
 	AcGesture::Sequencer seq;
 	AcGesture::Recognizer rec{ &seq };
@@ -151,6 +163,9 @@ inline void LoadSettings() {
 	std::string kofLine;
 	if (sec->Get("MovesKOF", &kofLine))
 		split(kofLine, s.movesKof);
+	std::string sfLine;
+	if (sec->Get("MovesSF", &sfLine))
+		split(sfLine, s.movesSf);
 	s.active = enabled;
 	if (s.active)
 		g_ctrlVblankHook = &VblankHook;
@@ -189,12 +204,13 @@ inline void HidePadButtons(TouchControlConfig *c) {
 inline void ApplyMoves(int id) {
 	State &s = Get();
 	s.character = id;
-	if (s.blazblue || s.kof) {
+	if (s.blazblue || s.kof || s.sf) {
 		// One set for every character (the app doesn't read who you play in these games).
 		static const char *const bbDefaults[4] = { "236A", "623C", "214B", "632146C" };
 		static const char *const kofDefaults[4] = { "236A", "623C", "214B", "236236A" };
-		const std::string *moves = s.blazblue ? s.movesBlazBlue : s.movesKof;
-		const char *const *defaults = s.blazblue ? bbDefaults : kofDefaults;
+		static const char *const sfDefaults[4] = { "236HP", "623HP", "214HK", "236236HP" };
+		const std::string *moves = s.blazblue ? s.movesBlazBlue : s.kof ? s.movesKof : s.movesSf;
+		const char *const *defaults = s.blazblue ? bbDefaults : s.kof ? kofDefaults : sfDefaults;
 		const AcGesture::ButtonMap &map = s.rec.Map();
 		for (int slot = 0; slot < 4; slot++)
 			s.rec.SetMove(slot, AcGesture::ParseMotion(moves[slot].empty() ? defaults[slot] : moves[slot], &map));
@@ -215,11 +231,13 @@ inline void Update() {
 		s.booted = true;
 		const std::string discId = g_paramSFO.GetValueString("DISC_ID");
 		s.usGame = discId == kGameId;
+		const std::string title = g_paramSFO.GetValueString("TITLE");
 		s.blazblue = IsBlazBlue(discId);
-		s.kof = !s.blazblue && IsKof(discId, g_paramSFO.GetValueString("TITLE"));
-		s.rec.SetButtonMap(s.blazblue ? AcGesture::BlazBlueMap() : s.kof ? AcGesture::KofMap() : AcGesture::GuiltyGearMap());
+		s.sf = !s.blazblue && IsStreetFighter(discId, title);
+		s.kof = !s.blazblue && !s.sf && IsKof(discId, title);
+		s.rec.SetButtonMap(s.blazblue ? AcGesture::BlazBlueMap() : s.kof ? AcGesture::KofMap() : s.sf ? AcGesture::StreetFighterMap() : AcGesture::GuiltyGearMap());
 		ApplyMoves(0);
-		INFO_LOG(Log::System, "AcPlus: gestures for %s (%s)", s.blazblue ? "BlazBlue" : s.kof ? "KOF" : "Guilty Gear", discId.c_str());
+		INFO_LOG(Log::System, "AcPlus: gestures for %s (%s)", s.blazblue ? "BlazBlue" : s.kof ? "KOF" : s.sf ? "Street Fighter Alpha 3" : "Guilty Gear", discId.c_str());
 	}
 
 	// Whose special moves: the player's character, once it reads the same a few times.

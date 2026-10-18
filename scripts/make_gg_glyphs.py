@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generates assets/ui_images/gg_buttons.svg: the P, K, S, HS and D labels used by the
-arcade-style touch buttons, drawn from PPSSPP's own Roboto Condensed Bold font.
+"""Generates assets/ui_images/gg_buttons.svg: the P, K, S, HS and D labels (Guilty Gear) and
+LP, MP, HP, LK, MK, HK (Street Fighter Alpha 3) used by the arcade-style touch buttons, drawn from PPSSPP's own Roboto Condensed Bold font.
 
 Usage: python3 scripts/make_gg_glyphs.py <path/to/Roboto_Condensed-Bold.ttf> <output.svg>
 
@@ -13,7 +13,9 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
-LABELS = [("I_GG_P", "P"), ("I_GG_K", "K"), ("I_GG_S", "S"), ("I_GG_HS", "HS"), ("I_GG_D", "D")]
+LABELS = [("I_GG_P", "P"), ("I_GG_K", "K"), ("I_GG_S", "S"), ("I_GG_HS", "HS"), ("I_GG_D", "D"),
+          # Street Fighter Alpha 3: light / medium / heavy punch and kick.
+          ("I_SF_LP", "LP"), ("I_SF_MP", "MP"), ("I_SF_HP", "HP"), ("I_SF_LK", "LK"), ("I_SF_MK", "MK"), ("I_SF_HK", "HK")]
 CAP_HEIGHT_PX = 30.0  # Same visual size as PPSSPP's I_A..I_F letters (about 31 px).
 SLOT_WIDTH = 80.0
 MARGIN = 10.0
