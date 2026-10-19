@@ -216,6 +216,10 @@ public class LauncherActivity extends Activity {
 	/** Big buttons grouped like the mobile fighting games (MobileLayout, patches/0006). */
 	static final String STYLE_MOBILE = "mobile";
 	private static final String K_MOBILE_SIZE = "mobile_size";
+	/** Movement on the touch screen: the D-pad ("Flechas") or a joystick that presses the D-pad. */
+	private static final String K_MOVE = "move_control";
+	private static final String MOVE_DPAD = "dpad";
+	private static final String MOVE_STICK = "stick";
 	private static final int[] MOBILE_SIZES = { 85, 100, 120 };
 	private static final String[] MOBILE_SIZE_LABELS = { "Medianos", "Grandes", "Enormes" };
 	/** Custom buttons this app may use (the mobile layout uses up to 9). */
@@ -308,6 +312,9 @@ public class LauncherActivity extends Activity {
 	private TextView stylePsp;
 	private TextView styleArcade;
 	private TextView styleMobile;
+	private TextView moveDpad;
+	private TextView moveStick;
+	private TextView moveDesc;
 	private LinearLayout mobileSizeRow;
 	private final TextView[] mobileSizeChips = new TextView[MOBILE_SIZES.length];
 	private TextView styleDesc;
@@ -615,6 +622,7 @@ public class LauncherActivity extends Activity {
 		// the button size and the screen.
 		int kind = gameKind();
 		String appliedKey = style + (kind == GameInspector.KIND_BB ? "|bb" : kind == GameInspector.KIND_KOF ? "|kof" : kind == GameInspector.KIND_SF ? "|sf" : "");
+		appliedKey += "|" + (stickMovement() ? MOVE_STICK : MOVE_DPAD);
 		if (mobile) {
 			float[] screen = landscapeDp();
 			appliedKey += "|" + mobileSize() + "|" + Math.round(screen[0]) + "x" + Math.round(screen[1]);
@@ -633,6 +641,10 @@ public class LauncherActivity extends Activity {
 		if (mobile) {
 			// The mobile look draws the filled and the outline shapes: needs an outline style.
 			ini.append("TouchButtonStyle = 1\n");
+		}
+		if (stickMovement()) {
+			// The joystick starts wherever the thumb lands on it (patches/0007 turns it into the D-pad).
+			ini.append("AutoCenterTouchAnalog = True\n");
 		}
 		if (writeLayout) {
 			appendButtonDefinitions(ini, style, kind);
@@ -765,7 +777,8 @@ public class LauncherActivity extends Activity {
 		}
 		ini.append(hitboxManualLines(prefs.getString(K_HB_MANUAL, "")));
 		ini.append("[Touch]\n")
-			.append("Mobile = ").append(STYLE_MOBILE.equals(currentStyle()) ? "True" : "False").append('\n');
+			.append("Mobile = ").append(STYLE_MOBILE.equals(currentStyle()) ? "True" : "False").append('\n')
+			.append("StickAsDpad = ").append(stickMovement() ? "True" : "False").append('\n');
 		ini.append("[Hud]\n")
 			.append("Enabled = ").append(prefs.getBoolean(K_HUD_ON, false) ? "True" : "False").append('\n')
 			.append("Design = ").append(hudDesign()).append('\n')
@@ -971,24 +984,36 @@ public class LauncherActivity extends Activity {
 			return;
 		}
 		boolean arcade = STYLE_ARCADE.equals(style);
-		// The mobile layout moves the D-pad and hides the stick: put them back.
-		ini.append("DPadX = -1.0\nDPadY = -1.0\nDPadSpacing = 1.0\nShowTouchDpad = True\n")
-			.append("AnalogStickX = -1.0\nAnalogStickY = -1.0\nShowAnalogStick = True\n")
+		// The mobile layout moves the D-pad: put it back. Movement: the D-pad or a joystick.
+		boolean stick = stickMovement();
+		ini.append("DPadX = -1.0\nDPadY = -1.0\nDPadSpacing = 1.0\n")
+			.append("ShowTouchDpad = ").append(stick ? "False" : "True").append('\n')
+			.append("ShowAnalogStick = ").append(stick ? "True" : "False").append('\n')
 			.append("LKeyX = -1.0\nLKeyY = -1.0\n")
 			.append("RKeyX = -1.0\nRKeyY = -1.0\n");
+		if (stick) {
+			// Where the D-pad goes, bigger than PPSSPP's own stick.
+			float[] screen = landscapeDp();
+			float size = MobileLayout.STICK_DP * 1.45f;
+			appendPos(ini, "AnalogStick", (0.035f * screen[1] + 0.02f * screen[0] + size / 2f) / screen[0],
+				(screen[1] - 0.05f * screen[1] - size / 2f) / screen[1], 1.45f);
+		} else {
+			ini.append("AnalogStickX = -1.0\nAnalogStickY = -1.0\n");
+		}
 		appendTouchLayout(ini, arcade, kind);
 	}
 
 	private void appendMobileLayout(StringBuilder ini, MobileLayout.Layout l) {
 		ini.append("ShowTouchCircle = False\nShowTouchCross = False\nShowTouchSquare = False\nShowTouchTriangle = False\n")
-			.append("ShowAnalogStick = False\n")
-			.append("ShowTouchDpad = True\n")
+			.append("ShowAnalogStick = ").append(l.stick ? "True" : "False").append('\n')
+			.append("ShowTouchDpad = ").append(l.stick ? "False" : "True").append('\n')
 			.append("LKeyX = -1.0\nLKeyY = -1.0\n")
 			.append("RKeyX = -1.0\nRKeyY = -1.0\n")
 			.append("ShowTouchLTrigger = ").append(l.showL ? "True" : "False").append('\n')
 			.append("ShowTouchRTrigger = ").append(l.showR ? "True" : "False").append('\n')
 			.append(String.format(Locale.ROOT, "DPadSpacing = %.4f\n", l.dpadSpacing));
 		appendPos(ini, "DPad", l.dpadX, l.dpadY, l.dpadScale);
+		appendPos(ini, "AnalogStick", l.dpadX, l.dpadY, l.stickScale);
 		appendPos(ini, "StartKey", l.startX, l.startY, 1.0f);
 		appendPos(ini, "SelectKey", l.selectX, l.selectY, 1.0f);
 		for (int i = 0; i < MAX_CUSTOM_BUTTONS; i++) {
@@ -1004,14 +1029,22 @@ public class LauncherActivity extends Activity {
 		}
 	}
 
-	/** Landscape size of the screen in dp: { width, height }. */
+	/**
+	 * Landscape size of the screen in PPSSPP's dp: { width, height }. PPSSPP counts 240 dpi as
+	 * one dp per pixel (Android counts 160), so its dp are 1.5 times Android's.
+	 */
 	@SuppressWarnings("deprecation")
 	private float[] landscapeDp() {
 		DisplayMetrics dm = new DisplayMetrics();
 		getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-		float w = Math.max(dm.widthPixels, dm.heightPixels) / dm.density;
-		float h = Math.min(dm.widthPixels, dm.heightPixels) / dm.density;
+		float perPixel = 240f / Math.max(1, dm.densityDpi);
+		float w = Math.max(dm.widthPixels, dm.heightPixels) * perPixel;
+		float h = Math.min(dm.widthPixels, dm.heightPixels) * perPixel;
 		return new float[] { w, h };
+	}
+
+	private boolean stickMovement() {
+		return MOVE_STICK.equals(prefs.getString(K_MOVE, MOVE_DPAD));
 	}
 
 	private int mobileSize() {
@@ -1026,7 +1059,7 @@ public class LauncherActivity extends Activity {
 
 	private MobileLayout.Layout mobileLayout(int kind) {
 		float[] screen = landscapeDp();
-		return MobileLayout.build(kind, screen[0], screen[1], mobileSize());
+		return MobileLayout.build(kind, screen[0], screen[1], mobileSize(), stickMovement());
 	}
 
 	private String currentStyle() {
@@ -3008,7 +3041,14 @@ public class LauncherActivity extends Activity {
 		controlsPreview.setKind(kind);
 		controlsPreview.setArcade(arcade);
 		float[] screen = landscapeDp();
-		controlsPreview.setMobile(mobile ? MobileLayout.build(kind, screen[0], screen[1], size) : null, screen[1]);
+		boolean stick = stickMovement();
+		styleChip(moveDpad, !stick);
+		styleChip(moveStick, stick);
+		moveDesc.setText(stick
+			? "Joystick: pon el pulgar donde quieras sobre él y arrástralo. Pulsa la cruceta del juego en 8 direcciones, así que sirve igual para los movimientos especiales (↓↘→)."
+			: "Flechas: la cruceta de la PSP, con las diagonales.");
+		controlsPreview.setStick(stick);
+		controlsPreview.setMobile(mobile ? MobileLayout.build(kind, screen[0], screen[1], size, stick) : null, screen[1]);
 		if (mobile) {
 			String common = " Botones grandes y oscuros como en los juegos de pelea de móvil, con atajos que pulsan varios botones a la vez, y una cruceta grande a la izquierda.";
 			switch (kind) {
@@ -3353,6 +3393,27 @@ public class LauncherActivity extends Activity {
 		}
 		mobileSizeRow.addView(sizeChips);
 		controls.addView(mobileSizeRow);
+
+		controls.addView(text("Movimiento", 15, C_TEXT, true));
+		LinearLayout moveRow = new LinearLayout(this);
+		moveRow.setOrientation(LinearLayout.HORIZONTAL);
+		moveRow.setPadding(0, dp(10), 0, dp(6));
+		moveDpad = chip("Flechas");
+		moveDpad.setOnClickListener(v -> {
+			prefs.edit().putString(K_MOVE, MOVE_DPAD).apply();
+			refreshStyle();
+		});
+		moveStick = chip("Joystick");
+		moveStick.setOnClickListener(v -> {
+			prefs.edit().putString(K_MOVE, MOVE_STICK).apply();
+			refreshStyle();
+		});
+		moveRow.addView(moveDpad, weighted(0, dp(4)));
+		moveRow.addView(moveStick, weighted(dp(4), 0));
+		controls.addView(moveRow);
+		moveDesc = text("", 13, C_MUTED, false);
+		moveDesc.setPadding(0, 0, 0, dp(12));
+		controls.addView(moveDesc);
 
 		controlsPreview = new ControlsPreviewView(this);
 		LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);

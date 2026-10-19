@@ -6,10 +6,12 @@ import java.util.List;
 /**
  * The "Móvil" button type: big round buttons grouped at the bottom right like the touch controls
  * of mobile fighting games, smaller shortcut buttons above them (two or three buttons at once),
- * and a big D-pad on the left. Each game gets its own buttons. Drawn by PPSSPP with dark filled
- * buttons and white labels (patches/0006).
+ * and a big D-pad or joystick on the left. Each game gets its own buttons. Drawn by PPSSPP with
+ * dark filled buttons and white labels (patches/0006); the joystick presses the D-pad
+ * (patches/0007).
  *
- * Sizes are worked out in dp for the real screen and given to PPSSPP as fractions of it.
+ * Sizes are worked out in PPSSPP's dp for the real screen (pixels × 240 / dpi, see
+ * LauncherActivity.landscapeDp) and given to PPSSPP as fractions of it.
  */
 final class MobileLayout {
 	private MobileLayout() {}
@@ -28,6 +30,8 @@ final class MobileLayout {
 	/** PPSSPP's D-pad: arms at 50 dp × spacing from the center, arm image about 61 × 45 dp. */
 	private static final float DPAD_RADIUS_DP = 50f;
 	private static final float DPAD_ARM_DP = 61f;
+	/** PPSSPP's stick base (I_STICK_BG) at scale 1, in dp. */
+	static final float STICK_DP = 120f;
 
 	static final class Button {
 		final String label;
@@ -49,6 +53,8 @@ final class MobileLayout {
 	static final class Layout {
 		final List<Button> buttons = new ArrayList<>();
 		float dpadX, dpadY, dpadScale, dpadSpacing, dpadSizeDp;
+		boolean stick;                                  // a joystick instead of the D-pad
+		float stickScale, stickSizeDp;                  // same center as the D-pad
 		float startX, startY, selectX, selectY;
 		boolean showL, showR;
 	}
@@ -99,11 +105,13 @@ final class MobileLayout {
 	 * @param wDp landscape screen width in dp
 	 * @param hDp landscape screen height in dp
 	 * @param sizePercent 85, 100 or 120
+	 * @param stick a joystick (that presses the D-pad) instead of the D-pad
 	 */
-	static Layout build(int kind, float wDp, float hDp, int sizePercent) {
+	static Layout build(int kind, float wDp, float hDp, int sizePercent, boolean stick) {
 		Layout out = new Layout();
+		out.stick = stick;
 		final float f = Math.max(0.6f, Math.min(1.5f, sizePercent / 100f));
-		final float d = Math.max(56f, Math.min(140f, 0.215f * hDp * f));   // main button diameter
+		final float d = Math.max(70f, Math.min(200f, 0.215f * hDp * f));   // main button diameter
 		final float small = 0.62f * d;                                      // shortcut diameter
 		final float m = 0.035f * hDp;                                       // margin
 		final float step = 1.1f * d;                                        // between centers in a row
@@ -125,12 +133,15 @@ final class MobileLayout {
 		}
 
 		// D-pad: about half the screen height wide.
-		final float k = Math.max(0.9f, Math.min(1.8f, 0.5f * hDp * f / (2f * DPAD_RADIUS_DP + DPAD_ARM_DP)));
+		final float k = Math.max(0.9f, Math.min(2.8f, 0.5f * hDp * f / (2f * DPAD_RADIUS_DP + DPAD_ARM_DP)));
 		out.dpadScale = k;
 		out.dpadSpacing = k;
 		out.dpadSizeDp = (2f * DPAD_RADIUS_DP + DPAD_ARM_DP) * k;
 		out.dpadX = (m + out.dpadSizeDp / 2f + 0.02f * wDp) / wDp;
 		out.dpadY = (hDp - m - out.dpadSizeDp / 2f) / hDp;
+		// Joystick: a base as wide as the D-pad, in the same place.
+		out.stickSizeDp = out.dpadSizeDp;
+		out.stickScale = out.stickSizeDp / STICK_DP;
 
 		// Start and Select at the bottom, in the middle.
 		final float yStartSelect = (hDp - 0.055f * hDp) / hDp;

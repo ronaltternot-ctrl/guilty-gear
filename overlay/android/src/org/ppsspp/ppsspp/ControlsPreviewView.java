@@ -40,6 +40,7 @@ final class ControlsPreviewView extends View {
 	private boolean arcade;
 	private int kind = GameInspector.KIND_GG;
 	private MobileLayout.Layout mobile;   // the "Móvil" layout, or null
+	private boolean stick;                // joystick instead of the D-pad
 	private float mobileHeightDp = 1f;
 
 	ControlsPreviewView(Context context) {
@@ -54,6 +55,14 @@ final class ControlsPreviewView extends View {
 		if (this.arcade != arcade) {
 			this.arcade = arcade;
 			updateDescription();
+			invalidate();
+		}
+	}
+
+	/** Movement with a joystick (true) or the D-pad. */
+	void setStick(boolean stick) {
+		if (this.stick != stick) {
+			this.stick = stick;
 			invalidate();
 		}
 	}
@@ -137,11 +146,12 @@ final class ControlsPreviewView extends View {
 			return;
 		}
 
-		// D-pad and analog stick on the left.
-		drawDpad(canvas, left + w * 0.135f, top + h * 0.50f, w * 0.068f);
-		drawRound(canvas, left + w * 0.135f, top + h * 0.83f, r * 0.95f, C_LINE);
-		fill.setColor(0x55FFFFFF);
-		canvas.drawCircle(left + w * 0.135f, top + h * 0.83f, r * 0.45f, fill);
+		// D-pad or joystick on the left.
+		if (stick) {
+			drawStick(canvas, left + w * 0.135f, top + h * 0.72f, r * 1.75f, C_FILL, C_LINE);
+		} else {
+			drawDpad(canvas, left + w * 0.135f, top + h * 0.62f, w * 0.068f);
+		}
 
 		// Shoulder buttons. In Guilty Gear's arcade layout R (Dust) becomes the D button; in
 		// Street Fighter's, L and R are the heavy kick and punch.
@@ -200,10 +210,13 @@ final class ControlsPreviewView extends View {
 		final float unit = h / mobileHeightDp;   // dp of the real screen -> preview pixels
 		stroke.setStrokeWidth(Math.max(dp(1f), r * 0.07f));
 
-		// D-pad: four arms around the center.
+		// D-pad (four arms around the center) or joystick.
 		float dcx = left + w * mobile.dpadX, dcy = top + h * mobile.dpadY;
 		float arm = mobile.dpadSizeDp * unit * 0.36f, half = arm * 0.42f;
-		for (int i = 0; i < 4; i++) {
+		if (mobile.stick) {
+			drawStick(canvas, dcx, dcy, mobile.stickSizeDp * unit / 2f, C_MOBILE_FILL, C_MOBILE_RING);
+		}
+		for (int i = 0; i < 4 && !mobile.stick; i++) {
 			canvas.save();
 			canvas.rotate(90f * i, dcx, dcy);
 			rect.set(dcx + half * 0.55f, dcy - half, dcx + half * 0.55f + arm, dcy + half);
@@ -244,6 +257,18 @@ final class ControlsPreviewView extends View {
 		if (mobile.showR) {
 			drawShoulder(canvas, left + w * 0.925f, top + h * 0.15f, r, "R");
 		}
+	}
+
+	/** A joystick: round base with a ring and the head in the middle. */
+	private void drawStick(Canvas canvas, float cx, float cy, float radius, int base, int ring) {
+		fill.setColor(base);
+		canvas.drawCircle(cx, cy, radius, fill);
+		stroke.setColor(ring);
+		canvas.drawCircle(cx, cy, radius - stroke.getStrokeWidth() / 2f, stroke);
+		fill.setColor(0xD0E8E8F0);
+		canvas.drawCircle(cx, cy, radius * 0.42f, fill);
+		stroke.setColor(0x60000000);
+		canvas.drawCircle(cx, cy, radius * 0.42f, stroke);
 	}
 
 	private void drawRound(Canvas canvas, float cx, float cy, float radius, int outline) {

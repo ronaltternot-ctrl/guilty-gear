@@ -1,0 +1,117 @@
+diff --git a/UI/GamepadEmu.h b/UI/GamepadEmu.h
+--- a/UI/GamepadEmu.h
++++ b/UI/GamepadEmu.h
+@@ -156,6 +156,11 @@ protected:
+ 	float centerX_ = -1.0f;
+ 	float centerY_ = -1.0f;
+ 
++	// Launcher build: with g_acplusStickAsDpad the left stick presses the D-pad instead.
++	int dpadDown_ = 0;
++	float headX_ = 0.0f;
++	float headY_ = 0.0f;
++
+ private:
+ 	void ProcessTouch(float x, float y, bool down);
+ };
+@@ -438,4 +443,7 @@ void GamepadUpdateOpacity(float force = -1.0f);
+ // Launcher build: draw the touch buttons like mobile fighting games (dark filled buttons, light
+ // ring, white labels). Set from the launcher's acplus.ini ([Touch] Mobile).
+ extern bool g_acplusMobileTouch;
++// Launcher build: the left touch stick presses the D-pad (8 directions) instead of moving the
++// analog stick, for games that only read the D-pad. Set from acplus.ini ([Touch] StickAsDpad).
++extern bool g_acplusStickAsDpad;
+ float GamepadGetOpacity();
+diff --git a/UI/GamepadEmu.cpp b/UI/GamepadEmu.cpp
+--- a/UI/GamepadEmu.cpp
++++ b/UI/GamepadEmu.cpp
+@@ -43,6 +43,7 @@ static float g_gamepadOpacity;
+ static double g_lastTouch;
+ 
+ bool g_acplusMobileTouch = false;
++bool g_acplusStickAsDpad = false;
+ 
+ // Launcher build, "Móvil" look: fill, ring and label colors (0xRRGGBB) and their alpha.
+ static void AcPlusMobileColors(float opacity, bool down, uint32_t *fill, uint32_t *ring, uint32_t *label) {
+@@ -567,11 +568,30 @@ void PSPStick::Draw(UIContext &dc) {
+ 	float stickY = centerY_;
+ 
+ 	float dx, dy;
+-	__CtrlPeekAnalog(stick_, &dx, &dy);
+-	rotateTouchHelper(dx, dy);
++	if (g_acplusStickAsDpad && stick_ == 0) {
++		// Pressing the D-pad: the analog value stays at 0, so show where the finger is.
++		dx = headX_;
++		dy = headY_;
++	} else {
++		__CtrlPeekAnalog(stick_, &dx, &dy);
++		rotateTouchHelper(dx, dy);
++	}
+ 
+ 	const TouchControlConfig &config = g_Config.GetTouchControlsConfig(g_display.GetDeviceOrientation());
+ 
++	if (g_acplusMobileTouch) {
++		// Launcher build, "Móvil" look: dark base with a light ring, light head.
++		const bool down = dragPointerId_ != -1;
++		uint32_t fill, ring, label;
++		AcPlusMobileColors(opacity, false, &fill, &ring, &label);
++		dc.Draw()->DrawImage(ImageID("I_STICK_BG"), stickX, stickY, scale_, fill, ALIGN_CENTER);
++		dc.Draw()->DrawImage(bgImg_, stickX, stickY, scale_, ring, ALIGN_CENTER);
++		const float headScale = stick_ ? config.fRightStickHeadScale : config.fLeftStickHeadScale;
++		dc.Draw()->DrawImage(ImageID("I_STICK"), stickX + dx * stick_size_ * scale_, stickY - dy * stick_size_ * scale_, scale_ * headScale,
++			colorAlpha(down ? 0xFFFFFF : 0xD8D8E0, std::min(1.0f, opacity * (down ? 1.5f : 1.1f))), ALIGN_CENTER);
++		return;
++	}
++
+ 	if (!config.bHideStickBackground)
+ 		dc.Draw()->DrawImage(bgImg_, stickX, stickY, 1.0f * scale_, colorBg, ALIGN_CENTER);
+ 	float headScale = stick_ ? config.fRightStickHeadScale : config.fLeftStickHeadScale;
+@@ -586,6 +606,7 @@ bool PSPStick::Touch(const TouchInput &input) {
+ 		dragPointerId_ = -1;
+ 		centerX_ = bounds_.centerX();
+ 		centerY_ = bounds_.centerY();
++		ProcessTouch(0.0f, 0.0f, false);   // launcher build: also lets go of the D-pad
+ 		__CtrlSetAnalogXY(stick_, 0.0f, 0.0f);
+ 		usedPointerMask = 0;
+ 		analogPointerMask = 0;
+@@ -630,6 +651,41 @@ bool PSPStick::Touch(const TouchInput &input) {
+ }
+ 
+ void PSPStick::ProcessTouch(float x, float y, bool down) {
++	if (g_acplusStickAsDpad && stick_ == 0) {
++		// Launcher build: 8 directions on the D-pad, 45 degrees each, past a small dead zone.
++		int mask = 0;
++		headX_ = 0.0f;
++		headY_ = 0.0f;
++		if (down && centerX_ >= 0.0f) {
++			const float inv = 1.0f / (stick_size_ * scale_);
++			float dx = (x - centerX_) * inv;
++			float dy = (y - centerY_) * inv;
++			rotateTouchHelper(dx, dy);
++			const float len = sqrtf(dx * dx + dy * dy);
++			if (len > 1.0f) {
++				dx /= len;
++				dy /= len;
++			}
++			headX_ = dx;
++			headY_ = -dy;
++			if (len > 0.3f) {
++				static const int masks[8] = { CTRL_RIGHT, CTRL_RIGHT | CTRL_DOWN, CTRL_DOWN, CTRL_DOWN | CTRL_LEFT,
++					CTRL_LEFT, CTRL_UP | CTRL_LEFT, CTRL_UP, CTRL_UP | CTRL_RIGHT };
++				mask = masks[(int)floorf(atan2f(dy, dx) / (2.0f * (float)M_PI) * 8.0f + 0.5f) & 7];
++			}
++		}
++		const int pressed = mask & ~dpadDown_;
++		const int released = dpadDown_ & ~mask;
++		dpadDown_ = mask;
++		if (pressed)
++			__CtrlUpdateButtons(pressed, 0);
++		if (released)
++			__CtrlUpdateButtons(0, released);
++		if (pressed && g_Config.bHapticFeedback)
++			System_Vibrate(HAPTIC_VIRTUAL_KEY);
++		__CtrlSetAnalogXY(stick_, 0.0f, 0.0f);
++		return;
++	}
+ 	if (down && centerX_ >= 0.0f) {
+ 		float inv_stick_size = 1.0f / (stick_size_ * scale_);
+ 

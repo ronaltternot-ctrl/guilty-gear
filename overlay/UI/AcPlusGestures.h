@@ -132,10 +132,12 @@ inline void LoadSettings() {
 		return;
 	if (const Section *profiles = ini.GetSection("Profiles"))
 		profiles->Get("Side", &s.side);
-	// The "Móvil" button look (patches/0006); read here because this runs before the touch
-	// controls are created.
-	if (const Section *touch = ini.GetSection("Touch"))
+	// The "Móvil" button look (patches/0006) and the stick that presses the D-pad (patches/0007);
+	// read here because this runs before the touch controls are created.
+	if (const Section *touch = ini.GetSection("Touch")) {
 		touch->Get("Mobile", &g_acplusMobileTouch);
+		touch->Get("StickAsDpad", &g_acplusStickAsDpad);
+	}
 	s.side = s.side == 1 ? 1 : 0;
 	const Section *sec = ini.GetSection("Gestures");
 	if (!sec)
