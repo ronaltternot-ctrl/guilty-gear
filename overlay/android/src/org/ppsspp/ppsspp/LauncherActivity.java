@@ -213,6 +213,13 @@ public class LauncherActivity extends Activity {
 
 	static final String STYLE_PSP = "psp";
 	static final String STYLE_ARCADE = "arcade";
+	/** Big buttons grouped like the mobile fighting games (MobileLayout, patches/0006). */
+	static final String STYLE_MOBILE = "mobile";
+	private static final String K_MOBILE_SIZE = "mobile_size";
+	private static final int[] MOBILE_SIZES = { 85, 100, 120 };
+	private static final String[] MOBILE_SIZE_LABELS = { "Medianos", "Grandes", "Enormes" };
+	/** Custom buttons this app may use (the mobile layout uses up to 9). */
+	private static final int MAX_CUSTOM_BUTTONS = 10;
 
 	/** Character auto-detection reads memory addresses of the US version only. */
 	private static final String PROFILE_GAME_ID = "ULUS10409";
@@ -300,6 +307,9 @@ public class LauncherActivity extends Activity {
 	private Switch fpsSwitch;
 	private TextView stylePsp;
 	private TextView styleArcade;
+	private TextView styleMobile;
+	private LinearLayout mobileSizeRow;
+	private final TextView[] mobileSizeChips = new TextView[MOBILE_SIZES.length];
 	private TextView styleDesc;
 	private ControlsPreviewView controlsPreview;
 	private final TextView[] effectChips = new TextView[EFFECTS.length];
@@ -597,13 +607,18 @@ public class LauncherActivity extends Activity {
 		boolean touch = prefs.getBoolean(K_TOUCH, true) || prefs.getBoolean(K_GESTURES, false);
 		boolean fps = prefs.getBoolean(K_FPS, false);
 
-		String style = prefs.getString(K_STYLE, STYLE_PSP);
-		boolean arcade = STYLE_ARCADE.equals(style);
+		String style = currentStyle();
+		boolean mobile = STYLE_MOBILE.equals(style);
 		// Only rewrite the button layout when the button type changes, so that buttons moved
 		// with the game's own layout editor stay where the player put them.
-		// The arcade labels depend on the game (P K S HS D or A B C D).
+		// The arcade labels depend on the game (P K S HS D or A B C D); the mobile layout also on
+		// the button size and the screen.
 		int kind = gameKind();
 		String appliedKey = style + (kind == GameInspector.KIND_BB ? "|bb" : kind == GameInspector.KIND_KOF ? "|kof" : kind == GameInspector.KIND_SF ? "|sf" : "");
+		if (mobile) {
+			float[] screen = landscapeDp();
+			appliedKey += "|" + mobileSize() + "|" + Math.round(screen[0]) + "x" + Math.round(screen[1]);
+		}
 		boolean writeLayout = !appliedKey.equals(prefs.getString(K_APPLIED_STYLE, ""));
 
 		StringBuilder ini = new StringBuilder();
@@ -615,14 +630,18 @@ public class LauncherActivity extends Activity {
 			.append("iShowStatusFlags = ").append(fps ? 2 : 0).append('\n')
 			.append("[Control]\n")
 			.append("ShowTouchControls = ").append(touch ? "True" : "False").append('\n');
-		if (writeLayout && arcade) {
-			appendArcadeButtonDefinitions(ini, kind);
+		if (mobile) {
+			// The mobile look draws the filled and the outline shapes: needs an outline style.
+			ini.append("TouchButtonStyle = 1\n");
+		}
+		if (writeLayout) {
+			appendButtonDefinitions(ini, style, kind);
 		}
 		ini.append("[TouchControls.Landscape]\n");
 		// Fast-forward isn't a PSP or arcade button: never show it.
 		ini.append("ShowTouchUnthrottle = False\n");
 		if (writeLayout) {
-			appendTouchLayout(ini, arcade, kind);
+			appendTouchLayout(ini, style, kind);
 		}
 		ini.append("[TouchControls.Portrait]\n")
 			.append("ShowTouchUnthrottle = False\n");
@@ -715,15 +734,12 @@ public class LauncherActivity extends Activity {
 
 	/** Settings and the two layout presets the emulator uses for per-character profiles. */
 	private void writeProfileConfig() throws IOException {
-		for (String preset : new String[] { STYLE_PSP, STYLE_ARCADE }) {
-			boolean arcade = STYLE_ARCADE.equals(preset);
+		for (String preset : new String[] { STYLE_PSP, STYLE_ARCADE, STYLE_MOBILE }) {
 			StringBuilder layout = new StringBuilder("[Control]\n");
-			// The game being launched decides the arcade labels (P K S HS D or A B C D).
-			if (arcade) {
-				appendArcadeButtonDefinitions(layout, gameKind());
-			}
+			// The game being launched decides the labels (P K S HS D, A B C D, LP ... HK).
+			appendButtonDefinitions(layout, preset, gameKind());
 			layout.append("[TouchControls.Landscape]\n").append("ShowTouchUnthrottle = False\n");
-			appendTouchLayout(layout, arcade, gameKind());
+			appendTouchLayout(layout, preset, gameKind());
 			writeText(new File(getFilesDir(), "acplus_layout_" + preset + ".ini"), layout.toString());
 		}
 
@@ -737,7 +753,7 @@ public class LauncherActivity extends Activity {
 		for (GameRosters.Roster roster : GameRosters.ALL) {
 			for (String key : roster.keys) {
 				String s = prefs.getString(K_CHAR_STYLE + key, null);
-				if (STYLE_PSP.equals(s) || STYLE_ARCADE.equals(s)) {
+				if (STYLE_PSP.equals(s) || STYLE_ARCADE.equals(s) || STYLE_MOBILE.equals(s)) {
 					ini.append(key).append(" = ").append(s).append('\n');
 				}
 			}
@@ -748,6 +764,8 @@ public class LauncherActivity extends Activity {
 			ini.append(HB_INI_KEYS[i]).append(" = ").append(prefs.getBoolean(HB_KEYS[i], true) ? "True" : "False").append('\n');
 		}
 		ini.append(hitboxManualLines(prefs.getString(K_HB_MANUAL, "")));
+		ini.append("[Touch]\n")
+			.append("Mobile = ").append(STYLE_MOBILE.equals(currentStyle()) ? "True" : "False").append('\n');
 		ini.append("[Hud]\n")
 			.append("Enabled = ").append(prefs.getBoolean(K_HUD_ON, false) ? "True" : "False").append('\n')
 			.append("Design = ").append(hudDesign()).append('\n')
@@ -813,8 +831,6 @@ public class LauncherActivity extends Activity {
 	private static final int IMG_MK = 45;
 	private static final int IMG_HK = 46;
 
-	/** Most arcade buttons of any game (Street Fighter's six). */
-	private static final int MAX_ARCADE_BUTTONS = 6;
 
 	/** One arcade button: label, PSP button it presses, and its spot on screen (fractions). */
 	private static final class ArcadeButton {
@@ -919,6 +935,23 @@ public class LauncherActivity extends Activity {
 
 	private static final float BUTTON_SCALE = 1.15f;
 
+	private void appendButtonDefinitions(StringBuilder ini, String style, int kind) {
+		if (STYLE_ARCADE.equals(style)) {
+			appendArcadeButtonDefinitions(ini, kind);
+		} else if (STYLE_MOBILE.equals(style)) {
+			List<MobileLayout.Button> buttons = mobileLayout(kind).buttons;
+			for (int i = 0; i < buttons.size(); i++) {
+				MobileLayout.Button b = buttons.get(i);
+				ini.append("Custom").append(i).append("Mapping = ")
+					.append(String.format(Locale.ROOT, "0x%016x", b.keys)).append('\n')
+					.append("Custom").append(i).append("Image = ").append(b.image).append('\n')
+					.append("Custom").append(i).append("Shape = 0\n")  // Round
+					.append("Custom").append(i).append("Toggle = False\n")
+					.append("Custom").append(i).append("Repeat = False\n");
+			}
+		}
+	}
+
 	private static void appendArcadeButtonDefinitions(StringBuilder ini, int kind) {
 		ArcadeButton[] buttons = arcadeButtons(kind);
 		for (int i = 0; i < buttons.length; i++) {
@@ -930,6 +963,75 @@ public class LauncherActivity extends Activity {
 				.append("Custom").append(i).append("Toggle = False\n")
 				.append("Custom").append(i).append("Repeat = False\n");
 		}
+	}
+
+	private void appendTouchLayout(StringBuilder ini, String style, int kind) {
+		if (STYLE_MOBILE.equals(style)) {
+			appendMobileLayout(ini, mobileLayout(kind));
+			return;
+		}
+		boolean arcade = STYLE_ARCADE.equals(style);
+		// The mobile layout moves the D-pad and hides the stick: put them back.
+		ini.append("DPadX = -1.0\nDPadY = -1.0\nDPadSpacing = 1.0\nShowTouchDpad = True\n")
+			.append("AnalogStickX = -1.0\nAnalogStickY = -1.0\nShowAnalogStick = True\n")
+			.append("LKeyX = -1.0\nLKeyY = -1.0\n")
+			.append("RKeyX = -1.0\nRKeyY = -1.0\n");
+		appendTouchLayout(ini, arcade, kind);
+	}
+
+	private void appendMobileLayout(StringBuilder ini, MobileLayout.Layout l) {
+		ini.append("ShowTouchCircle = False\nShowTouchCross = False\nShowTouchSquare = False\nShowTouchTriangle = False\n")
+			.append("ShowAnalogStick = False\n")
+			.append("ShowTouchDpad = True\n")
+			.append("LKeyX = -1.0\nLKeyY = -1.0\n")
+			.append("RKeyX = -1.0\nRKeyY = -1.0\n")
+			.append("ShowTouchLTrigger = ").append(l.showL ? "True" : "False").append('\n')
+			.append("ShowTouchRTrigger = ").append(l.showR ? "True" : "False").append('\n')
+			.append(String.format(Locale.ROOT, "DPadSpacing = %.4f\n", l.dpadSpacing));
+		appendPos(ini, "DPad", l.dpadX, l.dpadY, l.dpadScale);
+		appendPos(ini, "StartKey", l.startX, l.startY, 1.0f);
+		appendPos(ini, "SelectKey", l.selectX, l.selectY, 1.0f);
+		for (int i = 0; i < MAX_CUSTOM_BUTTONS; i++) {
+			if (i >= l.buttons.size()) {
+				ini.append("ShowComboKey").append(i).append(" = False\n");
+				continue;
+			}
+			MobileLayout.Button b = l.buttons.get(i);
+			ini.append(String.format(Locale.ROOT, "fcombo%dX = %.4f\n", i, b.x))
+				.append(String.format(Locale.ROOT, "fcombo%dY = %.4f\n", i, b.y))
+				.append(String.format(Locale.ROOT, "comboKeyScale%d = %.4f\n", i, b.scale))
+				.append("ShowComboKey").append(i).append(" = True\n");
+		}
+	}
+
+	/** Landscape size of the screen in dp: { width, height }. */
+	@SuppressWarnings("deprecation")
+	private float[] landscapeDp() {
+		DisplayMetrics dm = new DisplayMetrics();
+		getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+		float w = Math.max(dm.widthPixels, dm.heightPixels) / dm.density;
+		float h = Math.min(dm.widthPixels, dm.heightPixels) / dm.density;
+		return new float[] { w, h };
+	}
+
+	private int mobileSize() {
+		int v = prefs.getInt(K_MOBILE_SIZE, 100);
+		for (int size : MOBILE_SIZES) {
+			if (size == v) {
+				return v;
+			}
+		}
+		return 100;
+	}
+
+	private MobileLayout.Layout mobileLayout(int kind) {
+		float[] screen = landscapeDp();
+		return MobileLayout.build(kind, screen[0], screen[1], mobileSize());
+	}
+
+	private String currentStyle() {
+		String s = prefs.getString(K_STYLE, STYLE_PSP);
+		return STYLE_ARCADE.equals(s) || STYLE_MOBILE.equals(s) ? s : STYLE_PSP;
 	}
 
 	private static void appendTouchLayout(StringBuilder ini, boolean arcade, int kind) {
@@ -948,7 +1050,7 @@ public class LauncherActivity extends Activity {
 			// Move Start/Select toward the middle so they don't crowd the P button.
 			appendPos(ini, "StartKey", 0.56f, 0.91f, BUTTON_SCALE);
 			appendPos(ini, "SelectKey", 0.44f, 0.91f, BUTTON_SCALE);
-			for (int i = 0; i < MAX_ARCADE_BUTTONS; i++) {
+			for (int i = 0; i < MAX_CUSTOM_BUTTONS; i++) {
 				if (i >= buttons.length) {
 					ini.append("ShowComboKey").append(i).append(" = False\n");
 					continue;
@@ -963,7 +1065,7 @@ public class LauncherActivity extends Activity {
 			// -1 tells PPSSPP to put these back in their default spots.
 			ini.append("StartKeyX = -1.0\nStartKeyY = -1.0\n")
 				.append("SelectKeyX = -1.0\nSelectKeyY = -1.0\n");
-			for (int i = 0; i < MAX_ARCADE_BUTTONS; i++) {
+			for (int i = 0; i < MAX_CUSTOM_BUTTONS; i++) {
 				ini.append("ShowComboKey").append(i).append(" = False\n");
 			}
 		}
@@ -2792,7 +2894,7 @@ public class LauncherActivity extends Activity {
 
 	private String characterStyleLabel(String key) {
 		String style = prefs.getString(K_CHAR_STYLE + key, null);
-		String label = STYLE_ARCADE.equals(style) ? "Arcade" : STYLE_PSP.equals(style) ? "PSP" : "General";
+		String label = STYLE_ARCADE.equals(style) ? "Arcade" : STYLE_MOBILE.equals(style) ? "Móvil" : STYLE_PSP.equals(style) ? "PSP" : "General";
 		if (savedProfile(key).isFile()) {
 			label += " · distribución guardada";
 		}
@@ -2817,15 +2919,15 @@ public class LauncherActivity extends Activity {
 		final String key = roster.keys[index];
 		final boolean hasSaved = savedProfile(key).isFile();
 		String[] options = hasSaved
-			? new String[] { "General (el de la sección Controles)", "PSP", "Arcade", "Borrar la distribución guardada" }
-			: new String[] { "General (el de la sección Controles)", "PSP", "Arcade" };
+			? new String[] { "General (el de la sección Controles)", "PSP", "Arcade", "Móvil", "Borrar la distribución guardada" }
+			: new String[] { "General (el de la sección Controles)", "PSP", "Arcade", "Móvil" };
 		new AlertDialog.Builder(this)
 			.setTitle(roster.names[index])
 			.setItems(options, (d, which) -> {
-				if (which == 3) {
+				if (which == 4) {
 					deleteSavedProfile(key);
 				} else {
-					String style = which == 1 ? STYLE_PSP : which == 2 ? STYLE_ARCADE : null;
+					String style = which == 1 ? STYLE_PSP : which == 2 ? STYLE_ARCADE : which == 3 ? STYLE_MOBILE : null;
 					String old = prefs.getString(K_CHAR_STYLE + key, null);
 					SharedPreferences.Editor e = prefs.edit();
 					if (style == null) {
@@ -2890,14 +2992,41 @@ public class LauncherActivity extends Activity {
 	}
 
 	private void refreshStyle() {
-		boolean arcade = STYLE_ARCADE.equals(prefs.getString(K_STYLE, STYLE_PSP));
-		styleChip(stylePsp, !arcade);
+		String style = currentStyle();
+		boolean arcade = STYLE_ARCADE.equals(style);
+		boolean mobile = STYLE_MOBILE.equals(style);
+		styleChip(stylePsp, !arcade && !mobile);
 		styleChip(styleArcade, arcade);
-		controlsPreview.setArcade(arcade);
+		styleChip(styleMobile, mobile);
+		mobileSizeRow.setVisibility(mobile ? View.VISIBLE : View.GONE);
+		int size = mobileSize();
+		for (int i = 0; i < MOBILE_SIZES.length; i++) {
+			styleChip(mobileSizeChips[i], MOBILE_SIZES[i] == size);
+		}
 		int kind = gameKind();
 		boolean bb = kind == GameInspector.KIND_BB;
 		controlsPreview.setKind(kind);
-		if (kind == GameInspector.KIND_SF) {
+		controlsPreview.setArcade(arcade);
+		float[] screen = landscapeDp();
+		controlsPreview.setMobile(mobile ? MobileLayout.build(kind, screen[0], screen[1], size) : null, screen[1]);
+		if (mobile) {
+			String common = " Botones grandes y oscuros como en los juegos de pelea de móvil, con atajos que pulsan varios botones a la vez, y una cruceta grande a la izquierda.";
+			switch (kind) {
+				case GameInspector.KIND_BB:
+					styleDesc.setText("A, B y C abajo y D (Drive) arriba; atajos RC (A+B+C) y Burst (A+B+C+D)." + common);
+					break;
+				case GameInspector.KIND_KOF:
+					styleDesc.setText("A y C (puños) arriba, B y D (patadas) abajo; atajos Roll (A+B), CD y MAX (A+B+C)." + common);
+					break;
+				case GameInspector.KIND_SF:
+					styleDesc.setText("LP, MP y HP arriba, LK, MK y HK abajo; atajo V-ISM (MP+MK)." + common
+						+ " Pulsan □ = LP, △ = MP, R = HP, ✕ = LK, ○ = MK y L = HK: si uno no hace el golpe que dice, pon esa configuración en las opciones del juego.");
+					break;
+				default:
+					styleDesc.setText("P, K y S abajo, HS y D arriba; atajos RC (P+K+S) y Burst (D+HS). L (Respeto) sigue arriba." + common);
+					break;
+			}
+		} else if (kind == GameInspector.KIND_SF) {
 			styleDesc.setText(arcade
 				? "Como en la máquina de Capcom: LP, MP y HP arriba; LK, MK y HK abajo. La cruceta, el stick, Start y Select siguen ahí. Pulsan □ = LP, △ = MP, R = HP, ✕ = LK, ○ = MK y L = HK: si un botón no hace el golpe que dice, pon esa configuración en las opciones del juego."
 				: "Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. Los golpes son los que tenga el juego en su configuración de botones.");
@@ -2919,8 +3048,20 @@ public class LauncherActivity extends Activity {
 			styleDesc.setText("Como en la consola: △ ○ ✕ □, L y R, cruceta, stick, Start y Select. "
 				+ "En este juego: □ = P, ✕ = K, △ = S, ○ = HS, R = D.");
 		}
-		if (kind == GameInspector.KIND_GG) {
-			padNote.setText("Los controles funcionan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D y L1 = Respeto. Puedes reasignarlos dentro del juego en Ajustes → Controles.");
+		padNote.setText(padNoteText(kind));
+	}
+
+	/** How a Bluetooth / USB controller maps to each game. */
+	private static String padNoteText(int kind) {
+		switch (kind) {
+			case GameInspector.KIND_BB:
+				return "Los controles funcionan solos: X = A (□), Y = B (△), B = C (○) y A = D (✕). Puedes reasignarlos dentro del juego en sus opciones.";
+			case GameInspector.KIND_KOF:
+				return "Los controles funcionan solos: X = A (□), A = B (✕), Y = C (△) y B = D (○). Puedes reasignarlos dentro del juego en sus opciones.";
+			case GameInspector.KIND_SF:
+				return "Los controles funcionan solos: X = □, Y = △, A = ✕, B = ○, R1 = R y L1 = L. Qué golpe es cada uno lo decide la configuración de botones del juego.";
+			default:
+				return "Los controles funcionan solos: X = P (□), A = K (✕), Y = S (△), B = HS (○), R1 = D y L1 = Respeto. Puedes reasignarlos dentro del juego en Ajustes → Controles.";
 		}
 	}
 
@@ -3185,9 +3326,33 @@ public class LauncherActivity extends Activity {
 			prefs.edit().putString(K_STYLE, STYLE_ARCADE).apply();
 			refreshStyle();
 		});
+		styleMobile = chip("Móvil");
+		styleMobile.setOnClickListener(v -> {
+			prefs.edit().putString(K_STYLE, STYLE_MOBILE).apply();
+			refreshStyle();
+		});
 		styleRow.addView(stylePsp, weighted(0, dp(4)));
-		styleRow.addView(styleArcade, weighted(dp(4), 0));
+		styleRow.addView(styleArcade, weighted(dp(4), dp(4)));
+		styleRow.addView(styleMobile, weighted(dp(4), 0));
 		controls.addView(styleRow);
+		mobileSizeRow = new LinearLayout(this);
+		mobileSizeRow.setOrientation(LinearLayout.VERTICAL);
+		mobileSizeRow.setPadding(0, 0, 0, dp(10));
+		mobileSizeRow.addView(text("Tamaño de los botones", 15, C_TEXT, true));
+		LinearLayout sizeChips = new LinearLayout(this);
+		sizeChips.setOrientation(LinearLayout.HORIZONTAL);
+		sizeChips.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < MOBILE_SIZES.length; i++) {
+			final int size = MOBILE_SIZES[i];
+			mobileSizeChips[i] = chip(MOBILE_SIZE_LABELS[i]);
+			mobileSizeChips[i].setOnClickListener(v -> {
+				prefs.edit().putInt(K_MOBILE_SIZE, size).apply();
+				refreshStyle();
+			});
+			sizeChips.addView(mobileSizeChips[i], weighted(i == 0 ? 0 : dp(4), i == MOBILE_SIZES.length - 1 ? 0 : dp(4)));
+		}
+		mobileSizeRow.addView(sizeChips);
+		controls.addView(mobileSizeRow);
 
 		controlsPreview = new ControlsPreviewView(this);
 		LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);

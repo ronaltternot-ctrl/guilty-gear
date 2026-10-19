@@ -1,0 +1,103 @@
+--- a/UI/GamepadEmu.h
++++ b/UI/GamepadEmu.h
+@@ -298,6 +298,13 @@
+ 		{ ImageID("I_SF_LK"), 0.0f},
+ 		{ ImageID("I_SF_MK"), 0.0f},
+ 		{ ImageID("I_SF_HK"), 0.0f},
++		// Shortcut labels of the launcher's "Móvil" layout (indices 47-52).
++		{ ImageID("I_AC_RC"), 0.0f},
++		{ ImageID("I_AC_BURST"), 0.0f},
++		{ ImageID("I_AC_ROLL"), 0.0f},
++		{ ImageID("I_AC_CD"), 0.0f},
++		{ ImageID("I_AC_MAX"), 0.0f},
++		{ ImageID("I_AC_VISM"), 0.0f},
+ 	};
+ 
+ 	// Shape list
+@@ -428,4 +435,7 @@
+ void GamepadTouch();
+ void GamepadResetTouch();
+ void GamepadUpdateOpacity(float force = -1.0f);
++// Launcher build: draw the touch buttons like mobile fighting games (dark filled buttons, light
++// ring, white labels). Set from the launcher's acplus.ini ([Touch] Mobile).
++extern bool g_acplusMobileTouch;
+ float GamepadGetOpacity();
+--- a/UI/GamepadEmu.cpp
++++ b/UI/GamepadEmu.cpp
+@@ -42,6 +42,15 @@
+ static float g_gamepadOpacity;
+ static double g_lastTouch;
+ 
++bool g_acplusMobileTouch = false;
++
++// Launcher build, "Móvil" look: fill, ring and label colors (0xRRGGBB) and their alpha.
++static void AcPlusMobileColors(float opacity, bool down, uint32_t *fill, uint32_t *ring, uint32_t *label) {
++	*fill = colorAlpha(down ? 0x9A9AA6 : 0x101014, std::min(1.0f, opacity * (down ? 1.25f : 0.95f)));
++	*ring = colorAlpha(0xFFFFFF, std::min(1.0f, opacity * (down ? 1.5f : 0.8f)));
++	*label = colorAlpha(0xFFFFFF, std::min(1.0f, opacity * 1.6f));
++}
++
+ MultiTouchButton *primaryButton[TOUCH_MAX_POINTERS]{};
+ std::set<int> g_activeGesturePointers;
+ 
+@@ -176,6 +185,26 @@
+ 	if (opacity <= 0.0f)
+ 		return;
+ 
++	if (g_acplusMobileTouch) {
++		// Dark filled button (the filled shape, tinted), a light ring (the outline shape) and a
++		// white label. Pressed: lighter and a little bigger.
++		const bool down = IsDownVisually();
++		const float s = scale_ * (down ? 1.06f : 1.0f);
++		const float bgAngle = bgAngle_ * (M_PI * 2 / 360.0f);
++		uint32_t fill, ring, label;
++		AcPlusMobileColors(opacity, down, &fill, &ring, &label);
++		dc.Draw()->DrawImageRotated(bgDownImg_, bounds_.centerX(), bounds_.centerY(), s, bgAngle, fill, flipImageH_);
++		if (bgImg_ != bgDownImg_)
++			dc.Draw()->DrawImageRotated(bgImg_, bounds_.centerX(), bounds_.centerY(), s, bgAngle, ring, flipImageH_);
++		float lx = bounds_.centerX();
++		float ly = bounds_.centerY();
++		if (img_ == ImageID("I_TRIANGLE"))
++			ly -= 2.8f * s * 0.8f;
++		// Labels a little smaller than the button scale, so two-letter ones fit with room.
++		dc.Draw()->DrawImageRotated(img_, lx, ly, s * 0.8f, angle_ * (M_PI * 2 / 360.0f), label);
++		return;
++	}
++
+ 	float scale = scale_;
+ 	if (IsDownVisually()) {
+ 		if (g_Config.iTouchButtonStyle == 2) {
+@@ -476,6 +505,18 @@
+ 		float imgScale = isDown ? scale_ * TOUCH_SCALE_FACTOR : scale_;
+ 		float imgOpacity = opacity;
+ 
++		if (g_acplusMobileTouch) {
++			// Launcher build, "Móvil" look (see MultiTouchButton::Draw).
++			uint32_t fill, ring, label;
++			AcPlusMobileColors(opacity, isDown, &fill, &ring, &label);
++			dc.Draw()->DrawImageRotated(arrowDownIndex_, x, y, scale_, angle + PI, fill, false);
++			if (arrowIndex_ != arrowDownIndex_)
++				dc.Draw()->DrawImageRotated(arrowIndex_, x, y, scale_, angle + PI, ring, false);
++			if (overlayIndex_.isValid())
++				dc.Draw()->DrawImageRotated(overlayIndex_, x2, y2, scale_, angle + PI, label);
++			continue;
++		}
++
+ 		if (isDown && g_Config.iTouchButtonStyle == 2) {
+ 			imgScale = scale_;
+ 			imgOpacity *= 1.35f;
+--- a/UI/UIAtlas.cpp
++++ b/UI/UIAtlas.cpp
+@@ -209,6 +209,12 @@
+ 	{"I_SF_LK", true},
+ 	{"I_SF_MK", true},
+ 	{"I_SF_HK", true},
++	{"I_AC_RC", true},
++	{"I_AC_BURST", true},
++	{"I_AC_ROLL", true},
++	{"I_AC_CD", true},
++	{"I_AC_MAX", true},
++	{"I_AC_VISM", true},
+ };
+ 
+ static std::string PNGNameFromID(std::string_view id) {

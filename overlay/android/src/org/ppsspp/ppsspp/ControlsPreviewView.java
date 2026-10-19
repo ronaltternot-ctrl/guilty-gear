@@ -39,6 +39,8 @@ final class ControlsPreviewView extends View {
 	private final Path path = new Path();
 	private boolean arcade;
 	private int kind = GameInspector.KIND_GG;
+	private MobileLayout.Layout mobile;   // the "Móvil" layout, or null
+	private float mobileHeightDp = 1f;
 
 	ControlsPreviewView(Context context) {
 		super(context);
@@ -56,6 +58,14 @@ final class ControlsPreviewView extends View {
 		}
 	}
 
+	/** The "Móvil" layout as written for this screen (null for the PSP and arcade layouts). */
+	void setMobile(MobileLayout.Layout layout, float screenHeightDp) {
+		mobile = layout;
+		mobileHeightDp = Math.max(1f, screenHeightDp);
+		updateDescription();
+		invalidate();
+	}
+
 	/** BlazBlue's and KOF's arcade buttons are A, B, C and D, each game with its own layout. */
 	void setKind(int kind) {
 		if (this.kind != kind) {
@@ -66,6 +76,10 @@ final class ControlsPreviewView extends View {
 	}
 
 	private void updateDescription() {
+		if (mobile != null) {
+			setContentDescription("Vista previa: botones grandes estilo móvil abajo a la derecha, con atajos, y cruceta grande a la izquierda");
+			return;
+		}
 		setContentDescription(arcade
 			? (kind == GameInspector.KIND_BB ? "Vista previa: botones arcade A, B y C arriba, D abajo"
 				: kind == GameInspector.KIND_KOF ? "Vista previa: botones Neo Geo A, B, C y D en arco"
@@ -117,6 +131,11 @@ final class ControlsPreviewView extends View {
 		label.setColor(C_LINE);
 		label.setTextSize(r * 0.8f);
 		drawCenteredText(canvas, "≡", left + w * 0.5f, top + h * 0.09f);
+
+		if (mobile != null) {
+			drawMobile(canvas, left, top, w, h, r);
+			return;
+		}
 
 		// D-pad and analog stick on the left.
 		drawDpad(canvas, left + w * 0.135f, top + h * 0.50f, w * 0.068f);
@@ -170,6 +189,60 @@ final class ControlsPreviewView extends View {
 			drawCircleSymbol(canvas, cx + d, cy, r * 0.42f);
 			drawCrossSymbol(canvas, cx, cy + d, r * 0.4f);
 			drawSquareSymbol(canvas, cx - d, cy, r * 0.38f);
+		}
+	}
+
+	// The "Móvil" look (patches/0006): dark filled shapes, a light ring and white labels.
+	private static final int C_MOBILE_FILL = 0xC8101014;
+	private static final int C_MOBILE_RING = 0xB0FFFFFF;
+
+	private void drawMobile(Canvas canvas, float left, float top, float w, float h, float r) {
+		final float unit = h / mobileHeightDp;   // dp of the real screen -> preview pixels
+		stroke.setStrokeWidth(Math.max(dp(1f), r * 0.07f));
+
+		// D-pad: four arms around the center.
+		float dcx = left + w * mobile.dpadX, dcy = top + h * mobile.dpadY;
+		float arm = mobile.dpadSizeDp * unit * 0.36f, half = arm * 0.42f;
+		for (int i = 0; i < 4; i++) {
+			canvas.save();
+			canvas.rotate(90f * i, dcx, dcy);
+			rect.set(dcx + half * 0.55f, dcy - half, dcx + half * 0.55f + arm, dcy + half);
+			fill.setColor(C_MOBILE_FILL);
+			canvas.drawRoundRect(rect, half * 0.5f, half * 0.5f, fill);
+			stroke.setColor(C_MOBILE_RING);
+			canvas.drawRoundRect(rect, half * 0.5f, half * 0.5f, stroke);
+			path.reset();
+			float ax = dcx + half * 0.55f + arm * 0.62f;
+			path.moveTo(ax + half * 0.42f, dcy);
+			path.lineTo(ax - half * 0.25f, dcy - half * 0.45f);
+			path.lineTo(ax - half * 0.25f, dcy + half * 0.45f);
+			path.close();
+			fill.setColor(0xF0FFFFFF);
+			canvas.drawPath(path, fill);
+			canvas.restore();
+		}
+
+		// Buttons and shortcuts.
+		for (MobileLayout.Button b : mobile.buttons) {
+			float cx = left + w * b.x, cy = top + h * b.y;
+			float rad = b.sizeDp * unit / 2f;
+			fill.setColor(C_MOBILE_FILL);
+			canvas.drawCircle(cx, cy, rad, fill);
+			stroke.setColor(C_MOBILE_RING);
+			canvas.drawCircle(cx, cy, rad - stroke.getStrokeWidth() / 2f, stroke);
+			label.setColor(0xFFFFFFFF);
+			label.setTextSize(rad * (b.shortcut ? (b.label.length() > 3 ? 0.5f : 0.66f) : (b.label.length() > 1 ? 0.8f : 0.95f)));
+			drawCenteredText(canvas, b.label, cx, cy);
+		}
+
+		// Start / Select, and L / R when the game uses them on their own.
+		drawPill(canvas, left + w * mobile.selectX, top + h * mobile.selectY, r, "SELECT");
+		drawPill(canvas, left + w * mobile.startX, top + h * mobile.startY, r, "START");
+		if (mobile.showL) {
+			drawShoulder(canvas, left + w * 0.075f, top + h * 0.15f, r, "L");
+		}
+		if (mobile.showR) {
+			drawShoulder(canvas, left + w * 0.925f, top + h * 0.15f, r, "R");
 		}
 	}
 

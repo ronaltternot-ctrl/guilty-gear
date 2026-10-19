@@ -38,6 +38,7 @@
 #include "Core/ELF/ParamSFO.h"
 #include "Core/HLE/sceCtrl.h"
 #include "UI/AcPlusGestureCore.h"
+#include "UI/GamepadEmu.h"
 #include "UI/AcPlusGameData.h"
 #include "UI/AcPlusHitboxes.h"
 #include "UI/AcPlusProfiles.h"
@@ -131,6 +132,10 @@ inline void LoadSettings() {
 		return;
 	if (const Section *profiles = ini.GetSection("Profiles"))
 		profiles->Get("Side", &s.side);
+	// The "Móvil" button look (patches/0006); read here because this runs before the touch
+	// controls are created.
+	if (const Section *touch = ini.GetSection("Touch"))
+		touch->Get("Mobile", &g_acplusMobileTouch);
 	s.side = s.side == 1 ? 1 : 0;
 	const Section *sec = ini.GetSection("Gestures");
 	if (!sec)

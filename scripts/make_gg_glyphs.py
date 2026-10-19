@@ -15,9 +15,12 @@ from fontTools.ttLib import TTFont
 
 LABELS = [("I_GG_P", "P"), ("I_GG_K", "K"), ("I_GG_S", "S"), ("I_GG_HS", "HS"), ("I_GG_D", "D"),
           # Street Fighter Alpha 3: light / medium / heavy punch and kick.
-          ("I_SF_LP", "LP"), ("I_SF_MP", "MP"), ("I_SF_HP", "HP"), ("I_SF_LK", "LK"), ("I_SF_MK", "MK"), ("I_SF_HK", "HK")]
+          ("I_SF_LP", "LP"), ("I_SF_MP", "MP"), ("I_SF_HP", "HP"), ("I_SF_LK", "LK"), ("I_SF_MK", "MK"), ("I_SF_HK", "HK"),
+          # Shortcut buttons of the "Móvil" layout (smaller letters: they go on smaller buttons).
+          ("I_AC_RC", "RC", 24), ("I_AC_BURST", "BURST", 16), ("I_AC_ROLL", "ROLL", 19), ("I_AC_CD", "CD", 24),
+          ("I_AC_MAX", "MAX", 21), ("I_AC_VISM", "V-ISM", 16)]
 CAP_HEIGHT_PX = 30.0  # Same visual size as PPSSPP's I_A..I_F letters (about 31 px).
-SLOT_WIDTH = 80.0
+SLOT_WIDTH = 120.0
 MARGIN = 10.0
 
 
@@ -30,13 +33,16 @@ def main(font_path, out_path):
     height = CAP_HEIGHT_PX + 2 * MARGIN
 
     paths = []
-    for slot, (image_id, text) in enumerate(LABELS):
+    for slot, entry in enumerate(LABELS):
+        image_id, text = entry[0], entry[1]
+        cap = entry[2] if len(entry) > 2 else CAP_HEIGHT_PX
+        scale = cap / cap_height
         # Measure the label width to center it in its slot.
         advance = sum(glyph_set[cmap[ord(ch)]].width for ch in text)
         tracking = 0.04 * font["head"].unitsPerEm
         total = advance + tracking * (len(text) - 1)
         x0 = slot * SLOT_WIDTH + (SLOT_WIDTH - total * scale) / 2
-        baseline = MARGIN + CAP_HEIGHT_PX
+        baseline = MARGIN + (CAP_HEIGHT_PX + cap) / 2
 
         pen = SVGPathPen(glyph_set, ntos=lambda v: ("%.2f" % v).rstrip("0").rstrip("."))
         cursor = 0.0

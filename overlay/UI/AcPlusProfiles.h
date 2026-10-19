@@ -118,7 +118,7 @@ inline void Init() {
 	s.reader.Init(gameId);
 	s.active = enabled && s.reader.Supported();
 	s.side = s.side == 1 ? 1 : 0;
-	if (s.defaultStyle != "psp" && s.defaultStyle != "arcade")
+	if (s.defaultStyle != "psp" && s.defaultStyle != "arcade" && s.defaultStyle != "mobile")
 		s.defaultStyle = "psp";
 	s.profileDir = GetSysDirectory(DIRECTORY_SYSTEM) / "acplus_profiles";
 	s.reportPath = GetSysDirectory(DIRECTORY_SYSTEM) / "acplus_game_report.txt";
@@ -158,7 +158,7 @@ inline void Apply(const std::string &key) {
 	if (!fromProfile) {
 		auto it = s.styles.find(key);
 		std::string style = it != s.styles.end() ? it->second : s.defaultStyle;
-		if (style != "psp" && style != "arcade")
+		if (style != "psp" && style != "arcade" && style != "mobile")
 			style = s.defaultStyle;
 		if (!ini.Load(s.launcherDir / ("acplus_layout_" + style + ".ini"))) {
 			WARN_LOG(Log::System, "AcPlus: missing layout preset '%s'", style.c_str());
