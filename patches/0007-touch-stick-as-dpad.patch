@@ -32,7 +32,7 @@ diff --git a/UI/GamepadEmu.cpp b/UI/GamepadEmu.cpp
  
  // Launcher build, "Móvil" look: fill, ring and label colors (0xRRGGBB) and their alpha.
  static void AcPlusMobileColors(float opacity, bool down, uint32_t *fill, uint32_t *ring, uint32_t *label) {
-@@ -567,11 +568,30 @@ void PSPStick::Draw(UIContext &dc) {
+@@ -567,11 +568,32 @@ void PSPStick::Draw(UIContext &dc) {
  	float stickY = centerY_;
  
  	float dx, dy;
@@ -56,7 +56,9 @@ diff --git a/UI/GamepadEmu.cpp b/UI/GamepadEmu.cpp
 +		AcPlusMobileColors(opacity, false, &fill, &ring, &label);
 +		dc.Draw()->DrawImage(ImageID("I_STICK_BG"), stickX, stickY, scale_, fill, ALIGN_CENTER);
 +		dc.Draw()->DrawImage(bgImg_, stickX, stickY, scale_, ring, ALIGN_CENTER);
-+		const float headScale = stick_ ? config.fRightStickHeadScale : config.fLeftStickHeadScale;
++		float headScale = stick_ ? config.fRightStickHeadScale : config.fLeftStickHeadScale;
++		if (headScale <= 0.0f)
++			headScale = 1.0f;
 +		dc.Draw()->DrawImage(ImageID("I_STICK"), stickX + dx * stick_size_ * scale_, stickY - dy * stick_size_ * scale_, scale_ * headScale,
 +			colorAlpha(down ? 0xFFFFFF : 0xD8D8E0, std::min(1.0f, opacity * (down ? 1.5f : 1.1f))), ALIGN_CENTER);
 +		return;
@@ -65,7 +67,7 @@ diff --git a/UI/GamepadEmu.cpp b/UI/GamepadEmu.cpp
  	if (!config.bHideStickBackground)
  		dc.Draw()->DrawImage(bgImg_, stickX, stickY, 1.0f * scale_, colorBg, ALIGN_CENTER);
  	float headScale = stick_ ? config.fRightStickHeadScale : config.fLeftStickHeadScale;
-@@ -586,6 +606,7 @@ bool PSPStick::Touch(const TouchInput &input) {
+@@ -586,6 +608,7 @@ bool PSPStick::Touch(const TouchInput &input) {
  		dragPointerId_ = -1;
  		centerX_ = bounds_.centerX();
  		centerY_ = bounds_.centerY();
@@ -73,7 +75,19 @@ diff --git a/UI/GamepadEmu.cpp b/UI/GamepadEmu.cpp
  		__CtrlSetAnalogXY(stick_, 0.0f, 0.0f);
  		usedPointerMask = 0;
  		analogPointerMask = 0;
-@@ -630,6 +651,41 @@ bool PSPStick::Touch(const TouchInput &input) {
+@@ -594,6 +617,11 @@ bool PSPStick::Touch(const TouchInput &input) {
+ 	if (input.flags & TouchInputFlags::DOWN) {
+ 		const TouchControlConfig &config = g_Config.GetTouchControlsConfig(g_display.GetDeviceOrientation());
+ 		float fac = 0.5f * (stick_ ? config.fRightStickHeadScale : config.fLeftStickHeadScale)-0.5f;
++		if (g_acplusStickAsDpad && stick_ == 0) {
++			// Launcher build: a missing head scale (0) would leave no area to touch; and catch the
++			// thumb a little around the base, the stick then centers where it lands.
++			fac = std::max(fac, 0.3f);
++		}
+ 		if (dragPointerId_ == -1 && bounds_.Expand(bounds_.w*fac, bounds_.h*fac).Contains(input.x, input.y)) {
+ 			if (g_Config.bAutoCenterTouchAnalog) {
+ 				centerX_ = input.x;
+@@ -630,6 +658,41 @@ bool PSPStick::Touch(const TouchInput &input) {
  }
  
  void PSPStick::ProcessTouch(float x, float y, bool down) {

@@ -652,6 +652,7 @@ public class LauncherActivity extends Activity {
 		ini.append("[TouchControls.Landscape]\n");
 		// Fast-forward isn't a PSP or arcade button: never show it.
 		ini.append("ShowTouchUnthrottle = False\n");
+		ini.append(STICK_HEAD_LINES);
 		if (writeLayout) {
 			appendTouchLayout(ini, style, kind);
 		}
@@ -750,7 +751,7 @@ public class LauncherActivity extends Activity {
 			StringBuilder layout = new StringBuilder("[Control]\n");
 			// The game being launched decides the labels (P K S HS D, A B C D, LP ... HK).
 			appendButtonDefinitions(layout, preset, gameKind());
-			layout.append("[TouchControls.Landscape]\n").append("ShowTouchUnthrottle = False\n");
+			layout.append("[TouchControls.Landscape]\n").append("ShowTouchUnthrottle = False\n").append(STICK_HEAD_LINES);
 			appendTouchLayout(layout, preset, gameKind());
 			writeText(new File(getFilesDir(), "acplus_layout_" + preset + ".ini"), layout.toString());
 		}
@@ -947,6 +948,12 @@ public class LauncherActivity extends Activity {
 	}
 
 	private static final float BUTTON_SCALE = 1.15f;
+
+	/**
+	 * PPSSPP reads a missing stick head scale as 0: the stick then has no head and nothing to
+	 * touch. Always written, also into the layouts of the per-character profiles.
+	 */
+	private static final String STICK_HEAD_LINES = "LeftStickHeadScale = 1.0\nRightStickHeadScale = 1.0\nHideStickBackground = False\n";
 
 	private void appendButtonDefinitions(StringBuilder ini, String style, int kind) {
 		if (STYLE_ARCADE.equals(style)) {
