@@ -43,6 +43,8 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		prefs = getSharedPreferences("mugen", MODE_PRIVATE);
+		String title = getIntent().getStringExtra(EXTRA_TITLE);
+		GameRun.begin(this, ":mugen", title == null ? "MUGEN" : title, getIntent().getStringExtra(EXTRA_PATH));
 		super.onCreate(savedInstanceState);
 	}
 
@@ -58,8 +60,10 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 
 	@Override
 	protected void prepareGame(File baseDir) throws Exception {
+		GameRun.step(this, "preparando la carpeta del juego");
 		MugenInstaller.installEngine(this, baseDir);
 		MugenInstaller.writeConfig(baseDir);
+		GameRun.step(this, "arrancando Ikemen GO");
 	}
 
 	@Override
@@ -73,6 +77,7 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 	@Override
 	protected void onEngineStarted() {
 		engineStarted = true;
+		GameRun.step(this, GameRun.STEP_PLAYING);
 	}
 
 	private void applyPadSettings() {
@@ -221,6 +226,7 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 	}
 
 	private void quit() {
+		GameRun.end(this);
 		finish();
 		// SDLActivity.onDestroy ends this process (":mugen"); make sure even if the engine hangs.
 		new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(

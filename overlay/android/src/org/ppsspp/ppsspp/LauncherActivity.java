@@ -434,6 +434,8 @@ public class LauncherActivity extends Activity {
 	protected void onResume() {
 		super.onResume();
 		refreshAll();
+		handler.removeCallbacks(lastGameCheck);
+		handler.postDelayed(lastGameCheck, 900);
 		// When coming back from a game, the emulator process takes a moment to exit.
 		handler.removeCallbacks(refreshRunningTask);
 		handler.postDelayed(refreshRunningTask, 700);
@@ -1982,13 +1984,18 @@ public class LauncherActivity extends Activity {
 		}
 		String title = e.optString("title", e.optString("name"));
 		if (ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e))) {
-			String set = ArcadeLibrary.setName(f.getName());
-			if (ArcadeLibrary.looksNeoGeo(set) && !ArcadeLibrary.hasNeoGeoBios(this)) {
+			ArcadeCheck.Report r = ArcadeCheck.check(this, f);
+			String problems = r.ok() ? "" : r.describe(f.getName()).trim();
+			if (r.info == null && !ArcadeLibrary.looksNeoGeo(r.set)) {
+				problems = "";   // Another board (CPS…): nothing to check here.
+			}
+			if (!problems.isEmpty()) {
 				new AlertDialog.Builder(this)
-					.setTitle("Falta la BIOS de Neo Geo")
-					.setMessage("«" + title + "» es de Neo Geo y FBNeo necesita también neogeo.zip. Añádelo con «+ Arcade / Neo Geo» en el catálogo.")
-					.setPositiveButton("Añadir neogeo.zip", (d, w) -> pickArcade())
-					.setNegativeButton("Probar igual", (d, w) -> startArcade(f, title))
+					.setTitle("FBNeo no va a poder abrirlo")
+					.setMessage(title + "\n\n" + problems)
+					.setPositiveButton("Añadir archivos", (d, w) -> pickArcade())
+					.setNeutralButton("Probar igual", (d, w) -> startArcade(f, title))
+					.setNegativeButton("Cancelar", null)
 					.show();
 				return;
 			}
@@ -2089,6 +2096,35 @@ public class LauncherActivity extends Activity {
 			.show();
 	}
 
+	/** After an arcade / MUGEN game closed by itself: what GameRun saw. */
+	private final Runnable lastGameCheck = () -> {
+		if (isFinishing() || isDestroyed()) {
+			return;
+		}
+		final String report;
+		try {
+			report = GameRun.report(this);
+		} catch (RuntimeException ex) {
+			Log.w(TAG, "Last game", ex);
+			return;
+		}
+		if (report == null) {
+			return;
+		}
+		new AlertDialog.Builder(this)
+			.setTitle("El juego se cerró solo")
+			.setMessage("Esto es lo que pasó (mándamelo en una captura para corregirlo):\n\n" + report)
+			.setPositiveButton("Copiar", (d, w) -> {
+				android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+				if (cm != null) {
+					cm.setPrimaryClip(ClipData.newPlainText("Informe del juego", report));
+					Toast.makeText(this, "Informe copiado", Toast.LENGTH_SHORT).show();
+				}
+			})
+			.setNegativeButton("Cerrar", null)
+			.show();
+	};
+
 	private void pickArcade() {
 		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
 		intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -2142,6 +2178,7 @@ public class LauncherActivity extends Activity {
 		new Thread(() -> {
 			final List<org.json.JSONObject> added = new ArrayList<>();
 			final List<String> bios = new ArrayList<>();
+			final List<String> notes = new ArrayList<>();
 			final List<String> skipped = new ArrayList<>();
 			for (Uri u : uris) {
 				final String name = ArcadeLibrary.displayName(app, u);
@@ -2152,21 +2189,25 @@ public class LauncherActivity extends Activity {
 				handler.post(() -> pd.setMessage("Copiando " + name + "…"));
 				try {
 					File f = ArcadeLibrary.copyIn(app, u, name);
-					String set = ArcadeLibrary.setName(f.getName());
-					if (ArcadeLibrary.isBios(set)) {
-						bios.add(f.getName());
-						continue;
-					}
-					added.add(new org.json.JSONObject()
-						.put("system", ArcadeLibrary.SYSTEM)
-						.put("uri", Uri.fromFile(f).toString())
-						.put("name", f.getName())
-						.put("title", ArcadeLibrary.title(set))
-						.put("id", set)
-						.put("format", "ZIP"));
+					addArcadeArchive(app, f, name, true, added, bios, notes, skipped);
 				} catch (Throwable t) {
 					Log.w(TAG, "Arcade copy " + name, t);
 					skipped.add(name + " (" + t.getMessage() + ")");
+				}
+			}
+			// What FBNeo will be missing, now that every file is in place.
+			final List<String> problems = new ArrayList<>();
+			for (org.json.JSONObject e : added) {
+				File f = otherFile(e);
+				if (f == null) {
+					continue;
+				}
+				ArcadeCheck.Report r = ArcadeCheck.check(app, f);
+				if (!r.ok()) {
+					String d = r.describe(f.getName()).trim();
+					if (!d.isEmpty()) {
+						problems.add(e.optString("title") + ":\n" + d);
+					}
 				}
 			}
 			handler.post(() -> {
@@ -2185,12 +2226,11 @@ public class LauncherActivity extends Activity {
 				if (!bios.isEmpty()) {
 					msg.append(msg.length() > 0 ? "\n" : "").append("BIOS guardada: ").append(TextUtils.join(", ", bios)).append('.');
 				}
-				boolean needsBios = false;
-				for (org.json.JSONObject e : added) {
-					needsBios |= ArcadeLibrary.looksNeoGeo(e.optString("id"));
+				for (String n : notes) {
+					msg.append(msg.length() > 0 ? "\n" : "").append(n);
 				}
-				if (needsBios && !ArcadeLibrary.hasNeoGeoBios(this)) {
-					msg.append(msg.length() > 0 ? "\n\n" : "").append("⚠ Los juegos de Neo Geo necesitan también la BIOS neogeo.zip: añádela con «+ Arcade / Neo Geo».");
+				if (!problems.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n\n" : "").append("⚠ Para que FBNeo los abra:\n\n").append(TextUtils.join("\n\n", problems));
 				}
 				if (!skipped.isEmpty()) {
 					msg.append(msg.length() > 0 ? "\n\n" : "").append("No se añadieron:\n").append(TextUtils.join("\n", skipped));
@@ -2202,11 +2242,63 @@ public class LauncherActivity extends Activity {
 		}, "ArcadeAdd").start();
 	}
 
+	/**
+	 * One archive copied into the ROM folder: unpacks packs (a ZIP of ZIPs), gives a ZIP its
+	 * FBNeo set name when its files say which game it is, keeps BIOS sets out of the catalog.
+	 */
+	private void addArcadeArchive(android.content.Context app, File f, String shownName, boolean unpack, List<org.json.JSONObject> added,
+		List<String> bios, List<String> notes, List<String> skipped) throws IOException, org.json.JSONException {
+		boolean zip = f.getName().endsWith(".zip");
+		java.util.Set<Integer> crcs = ArcadeCheck.zipCrcs(f);   // ZIP directory or 7z header
+		if (zip && crcs == null) {
+			skipped.add(shownName + " (el ZIP está dañado o incompleto)");
+			if (!f.delete()) {
+				Log.w(TAG, "Could not delete " + f);
+			}
+			return;
+		}
+		if (zip && unpack) {
+			List<String> inner = ArcadeCheck.innerArchives(f);
+			if (!inner.isEmpty() && inner.size() * 2 >= crcs.size()) {
+				// A pack: each archive inside is a romset (or the BIOS).
+				for (String entry : inner) {
+					File in = ArcadeLibrary.extractInner(app, f, entry);
+					addArcadeArchive(app, in, entry, false, added, bios, notes, skipped);
+				}
+				if (!f.delete()) {
+					Log.w(TAG, "Could not delete " + f);
+				}
+				return;
+			}
+		}
+		String set = ArcadeLibrary.setName(f.getName());
+		if (crcs != null && ArcadeCheck.info(app, set) == null && !ArcadeLibrary.isBios(set)) {
+			ArcadeCheck.SetInfo match = ArcadeCheck.identify(app, crcs);
+			if (match != null) {
+				f = ArcadeLibrary.renameTo(f, match.name);
+				notes.add("«" + shownName + "» es " + ("neogeo".equals(match.name) ? "la BIOS de Neo Geo" : "«" + ArcadeCheck.title(app, match.name) + "»")
+					+ ": se guardó como " + f.getName() + ", el nombre que busca FBNeo.");
+				set = match.name;
+			}
+		}
+		if (ArcadeLibrary.isBios(set)) {
+			bios.add(f.getName());
+			return;
+		}
+		added.add(new org.json.JSONObject()
+			.put("system", ArcadeLibrary.SYSTEM)
+			.put("uri", Uri.fromFile(f).toString())
+			.put("name", f.getName())
+			.put("title", ArcadeCheck.title(app, set))
+			.put("id", set)
+			.put("format", zip ? "ZIP" : "7Z"));
+	}
+
 	private void pickMugen() {
 		new AlertDialog.Builder(this)
 			.setTitle("Añadir un juego MUGEN")
-			.setMessage("Elige la carpeta del juego (la que tiene «chars», «data» y «stages») o su archivo .zip. "
-				+ "Si viene en .rar o .7z, descomprímelo primero (por ejemplo con ZArchiver) y elige la carpeta.\n\n"
+			.setMessage("Elige la carpeta del juego (la que tiene «chars», «data» y «stages») o su archivo .zip o .7z. "
+				+ "Si viene en .rar o en varias partes (.7z.001…), descomprímelo primero (por ejemplo con ZArchiver) y elige la carpeta.\n\n"
 				+ "Se copia dentro de la app; los juegos grandes tardan unos minutos.")
 			.setPositiveButton("Elegir carpeta", (d, w) -> {
 				Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -2216,7 +2308,7 @@ public class LauncherActivity extends Activity {
 					showMessage("Sin selector de carpetas", "Tu teléfono no tiene un selector de carpetas disponible.");
 				}
 			})
-			.setNeutralButton("Elegir .zip", (d, w) -> {
+			.setNeutralButton("Elegir .zip / .7z", (d, w) -> {
 				Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
 				intent.addCategory(Intent.CATEGORY_OPENABLE);
 				intent.setType("*/*");
@@ -2233,8 +2325,10 @@ public class LauncherActivity extends Activity {
 	private void onMugenPicked(final Uri uri, final boolean folder) {
 		final android.content.Context app = getApplicationContext();
 		final String name = folder ? null : ArcadeLibrary.displayName(app, uri);
-		if (!folder && name != null && !name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
-			showMessage("Ese archivo no es .zip", "Elige un .zip, o descomprime el juego (por ejemplo con ZArchiver) y elige su carpeta.");
+		final boolean sevenZip = name != null && name.toLowerCase(Locale.ROOT).endsWith(".7z");
+		if (!folder && name != null && !name.toLowerCase(Locale.ROOT).endsWith(".zip") && !sevenZip) {
+			showMessage("Ese archivo no es .zip ni .7z", "Elige un .zip o un .7z, o descomprime el juego (por ejemplo con ZArchiver) y elige su carpeta. "
+				+ "Si viene en varias partes (.7z.001…) o en .rar, descomprímelo primero.");
 			return;
 		}
 		final android.app.ProgressDialog pd = progressDialog("Copiando el juego MUGEN");
@@ -2249,7 +2343,8 @@ public class LauncherActivity extends Activity {
 			File root = null;
 			String error = null;
 			try {
-				root = folder ? MugenInstaller.importTree(app, uri, progress) : MugenInstaller.importZip(app, uri, name, progress);
+				root = folder ? MugenInstaller.importTree(app, uri, progress)
+					: sevenZip ? MugenInstaller.import7z(app, uri, name, progress) : MugenInstaller.importZip(app, uri, name, progress);
 			} catch (Throwable t) {
 				Log.w(TAG, "MUGEN import", t);
 				error = t.getMessage() == null ? t.toString() : t.getMessage();

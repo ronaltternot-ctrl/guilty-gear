@@ -15,7 +15,7 @@ diff --git a/settings.gradle.kts b/settings.gradle.kts
 diff --git a/android/build.gradle.kts b/android/build.gradle.kts
 --- a/android/build.gradle.kts
 +++ b/android/build.gradle.kts
-@@ -68,6 +68,10 @@
+@@ -68,6 +68,13 @@
  	implementation("androidx.appcompat:appcompat:1.7.1")
  	implementation("androidx.documentfile:documentfile:1.1.0")
  	implementation("com.google.protobuf:protobuf-javalite:4.33.5")
@@ -23,10 +23,22 @@ diff --git a/android/build.gradle.kts b/android/build.gradle.kts
 +	// LibretroDroid; its errors and frame events come as Kotlin flows.
 +	implementation("com.github.Swordfish90:LibretroDroid:0.14.0")
 +	implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
++	// .7z archives (arcade ROMs and MUGEN games): Commons Compress with XZ for Java (LZMA).
++	implementation("org.apache.commons:commons-compress:1.27.1")
++	implementation("org.tukaani:xz:1.10")
  }
  
  protobuf {
-@@ -177,6 +181,8 @@
+@@ -168,6 +175,8 @@
+ 	}
+ 	packaging {
+ 		jniLibs.useLegacyPackaging = true
++		// Launcher build: the Apache Commons jars all bring these.
++		resources.excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES", "META-INF/versions/9/module-info.class")
+ 	}
+ 	sourceSets {
+ 		getByName("main") {
+@@ -177,6 +186,8 @@
  			aidl.directories.add("src")
  			resources.directories.add("src")
  			assets.directories.add("../assets")

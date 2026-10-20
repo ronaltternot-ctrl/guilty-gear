@@ -174,6 +174,23 @@ final class MugenInstaller {
 		return null;
 	}
 
+	/** Extracts a .7z into a new folder; returns the game's root folder. */
+	static File import7z(Context c, Uri uri, String name, Progress p) throws IOException {
+		File dest = freshDir(c, name.replaceAll("(?i)\\.7z$", ""));
+		try {
+			Seven.extract(c, uri, dest, p);
+		} catch (IOException | RuntimeException e) {
+			deleteTree(dest);
+			throw e;
+		}
+		File root = findRoot(dest);
+		if (root == null) {
+			deleteTree(dest);
+			throw new IOException("Ese .7z no parece un juego MUGEN: no tiene las carpetas «data» y «chars».");
+		}
+		return root;
+	}
+
 	/** Extracts a .zip into a new folder; returns the game's root folder. */
 	static File importZip(Context c, Uri uri, String name, Progress p) throws IOException {
 		File dest = freshDir(c, name);

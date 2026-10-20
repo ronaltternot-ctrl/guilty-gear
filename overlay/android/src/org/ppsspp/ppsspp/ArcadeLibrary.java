@@ -102,6 +102,59 @@ final class ArcadeLibrary {
 		return t != null ? t : set.toUpperCase(Locale.ROOT);
 	}
 
+	/** The title in the launcher's own list, or null. */
+	static String knownTitle(String set) {
+		return TITLES.get(set);
+	}
+
+	/** Copies one archive out of a pack ZIP into the ROM folder. */
+	static File extractInner(Context c, File zip, String entryName) throws IOException {
+		String base = entryName.replace('\\', '/');
+		base = base.substring(base.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT);
+		File dest = new File(romDir(c), base);
+		File tmp = new File(romDir(c), base + ".part");
+		try (java.util.zip.ZipFile z = new java.util.zip.ZipFile(zip)) {
+			java.util.zip.ZipEntry e = z.getEntry(entryName);
+			if (e == null) {
+				throw new IOException("No se encontró " + entryName);
+			}
+			try (InputStream in = z.getInputStream(e); OutputStream os = new FileOutputStream(tmp)) {
+				byte[] buf = new byte[1 << 16];
+				int n;
+				while ((n = in.read(buf)) > 0) {
+					os.write(buf, 0, n);
+				}
+			}
+		} catch (IOException e) {
+			//noinspection ResultOfMethodCallIgnored
+			tmp.delete();
+			throw e;
+		}
+		if (dest.exists() && !dest.delete()) {
+			throw new IOException("No se pudo reemplazar " + dest.getName());
+		}
+		if (!tmp.renameTo(dest)) {
+			throw new IOException("No se pudo guardar " + dest.getName());
+		}
+		return dest;
+	}
+
+	/** Gives a ZIP its romset name (kof2002.zip). Returns the renamed file. */
+	static File renameTo(File f, String set) throws IOException {
+		String ext = f.getName().toLowerCase(Locale.ROOT).endsWith(".7z") ? ".7z" : ".zip";
+		File dest = new File(f.getParentFile(), set + ext);
+		if (dest.equals(f)) {
+			return f;
+		}
+		if (dest.exists() && !dest.delete()) {
+			throw new IOException("No se pudo reemplazar " + dest.getName());
+		}
+		if (!f.renameTo(dest)) {
+			throw new IOException("No se pudo renombrar " + f.getName());
+		}
+		return dest;
+	}
+
 	/** SNK's Neo Geo games (they need neogeo.zip): the known ones, by name. */
 	static boolean looksNeoGeo(String set) {
 		String[] prefixes = { "kof", "kf2k", "kf10", "garou", "rbff", "fatfur", "aof", "samsh", "lastbl", "mslug", "matrim", "svc",

@@ -96,8 +96,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		rom = new File(path);
 		set = ArcadeLibrary.setName(rom.getName());
 		if (title == null || title.isEmpty()) {
-			title = ArcadeLibrary.title(set);
+			title = ArcadeCheck.title(this, set);
 		}
+		GameRun.begin(this, ":arcade", title, rom.getName() + " (" + (rom.length() / 1048576) + " MB)");
 		File base = new File(getFilesDir(), "arcade");
 		File system = new File(base, "system");
 		saves = new File(base, "saves");
@@ -125,6 +126,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 
 		retro = new GLRetroView(this, data);
 		getLifecycle().addObserver(retro);
+		GameRun.step(this, "emulador creado");
 		root.addView(retro, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
 
 		pad = new TouchPadView(this);
@@ -146,6 +148,8 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		FlowKt.launchIn(FlowKt.onEach(retro.getGLRetroEvents(), (event, cont) -> {
 			if (event instanceof GLRetroView.GLRetroEvents.FrameRendered && !started) {
 				handler.post(this::onFirstFrame);
+			} else if (event instanceof GLRetroView.GLRetroEvents.SurfaceCreated) {
+				handler.post(() -> GameRun.step(this, "juego cargado, esperando el primer cuadro"));
 			}
 			return Unit.INSTANCE;
 		}), GlobalScope.INSTANCE);
@@ -203,6 +207,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		}
 		started = true;
 		status.setVisibility(View.GONE);
+		GameRun.step(this, GameRun.STEP_PLAYING);
 	}
 
 	private void onRetroError(int code) {
@@ -214,16 +219,20 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			return;
 		}
 		failed = true;
+		GameRun.step(this, "error " + code + " del emulador");
 		String msg;
 		if (code == GLRetroView.ERROR_LOAD_LIBRARY) {
 			msg = "No se pudo cargar el emulador FBNeo en este teléfono.";
 		} else if (code == GLRetroView.ERROR_LOAD_GAME) {
+			String found = "";
+			try {
+				found = ArcadeCheck.check(this, rom).describe(rom.getName()).trim();
+			} catch (RuntimeException e) {
+				Log.w(TAG, "Check", e);
+			}
 			msg = "FBNeo no pudo abrir «" + rom.getName() + "».\n\n"
-				+ "• El ZIP tiene que ser el romset que espera FBNeo (las versiones actuales de FBNeo o MAME suelen servir; los muy viejos no).\n"
-				+ (ArcadeLibrary.looksNeoGeo(set) && !ArcadeLibrary.hasNeoGeoBios(this)
-					? "• Falta la BIOS de Neo Geo: añade también neogeo.zip en el catálogo.\n"
-					: "• Si es de Neo Geo, neogeo.zip tiene que estar en el catálogo.\n")
-				+ "• Si es un hack o una versión (Magic Plus, Plus…), añade también el juego original (por ejemplo kof2002.zip).";
+				+ (!found.isEmpty() ? found : "• El ZIP tiene que ser el romset que espera FBNeo (las versiones actuales de FBNeo o MAME suelen servir; los muy viejos no).\n"
+					+ "• Los juegos de Neo Geo necesitan neogeo.zip en el catálogo, y las versiones hack (Magic Plus, Plus…) también el juego original.");
 		} else if (code == GLRetroView.ERROR_GL_NOT_COMPATIBLE) {
 			msg = "La GPU de este teléfono no es compatible con el visor del emulador.";
 		} else {
@@ -452,6 +461,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			pauseGame();
 			saveSram();
 		}
+		GameRun.end(this);
 		finish();
 	}
 
@@ -482,6 +492,12 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	@Override
 	protected void onDestroy() {
 		super.onDestroy();
+		if (!isFinishing()) {
+			// Android is recreating the screen (it shouldn't, configChanges covers it): keep the
+			// process, the new screen starts the core again.
+			GameRun.unexpected(this, "Android volvió a crear la pantalla del juego");
+			return;
+		}
 		// The core keeps global state: this process (":arcade") ends with the game.
 		handler.postDelayed(() -> android.os.Process.killProcess(android.os.Process.myPid()), 400);
 	}
