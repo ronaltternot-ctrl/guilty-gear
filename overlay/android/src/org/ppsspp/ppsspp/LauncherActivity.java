@@ -106,8 +106,13 @@ public class LauncherActivity extends Activity {
 	private static final String K_FSR_ON = "fsr_on_";
 	private static final String K_FSR_SCALE = "fsr_scale_";   // factor x 10: 15, 20, 30
 	private static final String K_FSR_SHARP = "fsr_sharp_";   // RCAS sharpness, 0-100
-	private static final int[] FSR_SCALES = { 15, 20, 30 };
-	private static final String[] FSR_SCALE_LABELS = { "1.5×", "2×", "3×" };
+	private static final int[] FSR_SCALES = { 15, 20, 30, 40 };
+	private static final String K_FSR_SPRITES = "fsr_sprites_";   // xBR on the 480x272 picture first
+	private static final String K_FSR_DETAIL = "fsr_detail_";     // AMD CAS after RCAS, 0-100
+	private static final String K_FSR_COLOR = "fsr_color_";       // vibrance + soft contrast, 0-100
+	private static final int FSR_DEFAULT_DETAIL = 50;
+	private static final int FSR_DEFAULT_COLOR = 30;
+	private static final String[] FSR_SCALE_LABELS = { "1.5×", "2×", "3×", "4×" };
 	private static final int FSR_DEFAULT_SCALE = 20;
 	private static final int FSR_DEFAULT_SHARP = 85;
 	// Device test (DeviceBenchmark) and custom HUD (UI/AcPlusHud.h).
@@ -363,6 +368,11 @@ public class LauncherActivity extends Activity {
 	private LinearLayout fsrOptions;
 	private final TextView[] fsrScaleChips = new TextView[FSR_SCALES.length];
 	private SeekBar fsrSeek;
+	private Switch fsrSpritesSwitch;
+	private SeekBar fsrDetailSeek;
+	private SeekBar fsrColorSeek;
+	private TextView fsrDetailValue;
+	private TextView fsrColorValue;
 	private TextView fsrSharpValue;
 	private TextView fsrInfo;
 	private TextView fsrWarn;
@@ -664,11 +674,30 @@ public class LauncherActivity extends Activity {
 		Effect effect = currentEffect();
 		ini.append("[PostShaderList]\n");
 		if (fsrOn()) {
-			ini.append("PostShader1 = AcFsrEasu\n")
-				.append("PostShader2 = AcFsrRcas\n")
-				.append("[PostShaderSetting]\n")
+			// [xBR for the sprites] -> EASU -> RCAS -> [AMD CAS + color]
+			List<String> chain = new ArrayList<>();
+			if (fsrSprites()) {
+				chain.add("AcXbrSprites");
+			}
+			chain.add("AcFsrEasu");
+			chain.add("AcFsrRcas");
+			boolean finish = fsrDetail() > 0 || fsrColor() > 0;
+			if (finish) {
+				chain.add("AcFsrFinish");
+			}
+			for (int i = 0; i < chain.size(); i++) {
+				ini.append("PostShader").append(i + 1).append(" = ").append(chain.get(i)).append('\n');
+			}
+			ini.append("[PostShaderSetting]\n")
 				.append(String.format(Locale.ROOT, "AcFsrEasuSettingCurrentValue1 = %.2f\n", fsrScale() / 10f))
 				.append(String.format(Locale.ROOT, "AcFsrRcasSettingCurrentValue1 = %.2f\n", fsrSharp() / 100f));
+			if (fsrSprites()) {
+				ini.append("AcXbrSpritesSettingCurrentValue1 = 2.00\n");
+			}
+			if (finish) {
+				ini.append(String.format(Locale.ROOT, "AcFsrFinishSettingCurrentValue1 = %.2f\n", fsrDetail() / 100f))
+					.append(String.format(Locale.ROOT, "AcFsrFinishSettingCurrentValue2 = %.2f\n", fsrColor() / 100f));
+			}
 		} else {
 			if (effect.shaders.length == 0) {
 				ini.append("PostShader1 = Off\n");
@@ -788,7 +817,10 @@ public class LauncherActivity extends Activity {
 			.append("Enabled = ").append(fsrOn() ? "True" : "False").append('\n')
 			.append("GameId = ").append(fsrGameKey().equals("default") ? "" : fsrGameKey()).append('\n')
 			.append(String.format(Locale.ROOT, "Scale = %.2f\n", fsrScale() / 10f))
-			.append(String.format(Locale.ROOT, "Sharpness = %.2f\n", fsrSharp() / 100f));
+			.append(String.format(Locale.ROOT, "Sharpness = %.2f\n", fsrSharp() / 100f))
+			.append("Sprites = ").append(fsrSprites() ? "True" : "False").append('\n')
+			.append(String.format(Locale.ROOT, "Detail = %.2f\n", fsrDetail() / 100f))
+			.append(String.format(Locale.ROOT, "Color = %.2f\n", fsrColor() / 100f));
 		ini.append("[Gestures]\n")
 			.append("Enabled = ").append(prefs.getBoolean(K_GESTURES, false) ? "True" : "False").append('\n')
 			.append("Scale = ").append(prefs.getInt(K_GES_SCALE, 100)).append('\n')
@@ -2039,8 +2071,12 @@ public class LauncherActivity extends Activity {
 		hint += "\nRecomendada para tu pantalla: " + recommendedRes + "×.";
 		Effect effect = currentEffect();
 		boolean fsr = fsrOn();
-		boolean applies = effect.shaders.length == 0 || fsr;
-		if (fsr) {
+		boolean spriteMode = fsr && fsrSprites();
+		boolean applies = (effect.shaders.length == 0 || fsr) && !spriteMode;
+		if (spriteMode) {
+			hint = "Con AMD FSR en «Modo sprites» el juego se dibuja a 480 × 272, xBR lo dobla y FSR lo escala ("
+				+ fsrScaleLabel(fsrScale()) + "): esta resolución no se usa. Para usarla, apaga «Modo sprites» en «Gráficos».";
+		} else if (fsr) {
 			hint += "\nCon AMD FSR activo el juego se dibuja a esta resolución y FSR la escala ("
 				+ fsrScaleLabel(fsrScale()) + "). Mira «Gráficos».";
 		} else if (!applies) {
@@ -2360,6 +2396,19 @@ public class LauncherActivity extends Activity {
 		return Math.max(0, Math.min(100, prefs.getInt(K_FSR_SHARP + fsrGameKey(), FSR_DEFAULT_SHARP)));
 	}
 
+	/** Sprite mode: drawn at 480x272, xBR doubles it, then FSR (on by default: all four games are 2D). */
+	private boolean fsrSprites() {
+		return prefs.getBoolean(K_FSR_SPRITES + fsrGameKey(), true);
+	}
+
+	private int fsrDetail() {
+		return Math.max(0, Math.min(100, prefs.getInt(K_FSR_DETAIL + fsrGameKey(), FSR_DEFAULT_DETAIL)));
+	}
+
+	private int fsrColor() {
+		return Math.max(0, Math.min(100, prefs.getInt(K_FSR_COLOR + fsrGameKey(), FSR_DEFAULT_COLOR)));
+	}
+
 	private static String fsrScaleLabel(int scale10) {
 		return scale10 % 10 == 0 ? (scale10 / 10) + "×" : String.format(Locale.ROOT, "%.1f×", scale10 / 10f);
 	}
@@ -2392,7 +2441,8 @@ public class LauncherActivity extends Activity {
 			return;
 		}
 		amdButtonStatus.setText(fsrOn()
-			? "FSR 1.0 activo · " + fsrScaleLabel(fsrScale()) + " · nitidez " + sharpLabel(fsrSharp())
+			? "FSR 1.0 activo · " + (fsrSprites() ? "sprites xBR · " : "") + fsrScaleLabel(fsrScale()) + " · nitidez " + sharpLabel(fsrSharp())
+				+ " · detalle " + sharpLabel(fsrDetail())
 			: "AMD FSR 1.0 · apagado · toca para configurarlo");
 		amdButtonStatus.setTextColor(fsrOn() ? C_OK : C_MUTED);
 	}
@@ -2410,9 +2460,21 @@ public class LauncherActivity extends Activity {
 			fsrSeek.setProgress(sharp);
 		}
 		fsrSharpValue.setText(sharpLabel(sharp));
+		boolean sprites = fsrSprites();
+		fsrSpritesSwitch.setChecked(sprites);
+		int detail = fsrDetail(), color = fsrColor();
+		if (fsrDetailSeek.getProgress() != detail) {
+			fsrDetailSeek.setProgress(detail);
+		}
+		if (fsrColorSeek.getProgress() != color) {
+			fsrColorSeek.setProgress(color);
+		}
+		fsrDetailValue.setText(detail == 0 ? "apagado" : sharpLabel(detail));
+		fsrColorValue.setText(color == 0 ? "apagado" : sharpLabel(color));
 
-		// What FSR will do with the current internal resolution (same rule as patches/0005).
-		int res = clampRes(prefs.getInt(K_RES, recommendedRes));
+		// What FSR will do with the current internal resolution (same rule as patches/0005). In
+		// sprite mode the game is drawn at 1x and xBR doubles it before FSR.
+		int res = sprites ? 2 : clampRes(prefs.getInt(K_RES, recommendedRes));
 		int rw = PSP_W * res, rh = PSP_H * res;
 		int[] screen = gameSizeOnScreen();
 		float room = Math.min(screen[0] / (float) rw, screen[1] / (float) rh);
@@ -2421,11 +2483,16 @@ public class LauncherActivity extends Activity {
 		// A few pixels short of the full factor (e.g. 1.98x) is still "the factor you chose".
 		boolean capped = actual < wanted * 0.97f;
 		int ow = Math.round(rw * actual), oh = Math.round(rh * actual);
-		fsrInfo.setText("Resolución interna " + res + "× (" + rw + " × " + rh + ") → FSR "
+		fsrInfo.setText((sprites ? "Modo sprites: el juego se dibuja a 480 × 272 → xBR 960 × 544 → FSR " : "Resolución interna " + res + "× (" + rw + " × " + rh + ") → FSR ")
 			+ (capped ? String.format(Locale.ROOT, "%.2f×", actual) : fsrScaleLabel(scale))
-			+ " → " + ow + " × " + oh + "\nEl juego ocupa " + screen[0] + " × " + screen[1] + " en tu pantalla.");
+			+ " → " + ow + " × " + oh + (detail > 0 ? " → CAS" : "") + "\nEl juego ocupa " + screen[0] + " × " + screen[1] + " en tu pantalla."
+			+ (sprites ? " La resolución interna elegida arriba no se usa en este modo." : ""));
 		String warn = null;
-		if (room <= 1.05f) {
+		if (sprites && capped) {
+			warn = String.format(Locale.ROOT, "El factor se queda en ×%.2f: la imagen no puede ser más grande que tu pantalla.", actual);
+		} else if (sprites) {
+			warn = null;
+		} else if (room <= 1.05f) {
 			warn = "⚠ Tu resolución interna ya llena la pantalla: FSR aporta poco aquí (solo la nitidez de RCAS) y gasta batería. "
 				+ "Para que FSR rinda, baja la resolución interna a " + Math.max(1, Math.round(screen[1] / (float) PSP_H / 2f)) + "× o menos.";
 		} else if (room < 1.5f) {
@@ -2503,7 +2570,8 @@ public class LauncherActivity extends Activity {
 		+ "Esta app es PPSSPP con cambios, distribuida bajo la misma licencia. ppsspp.org\n\n"
 		+ "■ AMD FidelityFX Super Resolution 1.0 (FSR 1)\n"
 		+ "Los filtros EASU y RCAS de «BETA · AMD GRAPHICS» están adaptados del código de FSR 1.0 de AMD "
-		+ "(github.com/GPUOpen-Effects/FidelityFX-FSR), publicado con la licencia MIT:\n\n"
+		+ "(github.com/GPUOpen-Effects/FidelityFX-FSR), y «Detalle extra» del de AMD FidelityFX CAS "
+		+ "(github.com/GPUOpen-Effects/FidelityFX-CAS), ambos publicados con la licencia MIT:\n\n"
 		+ AMD_MIT_LICENSE + "\n\n"
 		+ "AMD y FidelityFX son marcas de Advanced Micro Devices, Inc. Esta app no está afiliada ni respaldada por AMD.\n\n"
 		+ "■ Efecto «IA» (NNEDI3)\n"
@@ -3829,7 +3897,7 @@ public class LauncherActivity extends Activity {
 		fsrTitle.setPadding(0, dp(4), 0, dp(12));
 		fsrPanel.addView(fsrTitle);
 		fsrSwitch = switchRow(fsrPanel, "Activar FSR",
-			"EASU escala la imagen del juego y RCAS le devuelve la nitidez. Solo trabaja sobre la imagen final: los sprites no se tocan.");
+			"EASU escala la imagen del juego, RCAS le devuelve la nitidez y AMD CAS saca más detalle. Solo trabaja sobre la imagen final.");
 		fsrSwitch.setOnCheckedChangeListener((b, checked) -> {
 			if (checked == fsrOn()) {
 				return;
@@ -3844,7 +3912,19 @@ public class LauncherActivity extends Activity {
 		fsrOptions.setPadding(0, dp(14), 0, 0);
 		fsrPanel.addView(fsrOptions);
 
-		fsrOptions.addView(text("Factor de escala", 15, C_TEXT, true));
+		fsrSpritesSwitch = switchRow(fsrOptions, "Modo sprites (xBR + FSR)",
+			"Para juegos 2D como estos: el juego se dibuja a 480 × 272, xBR redondea los bordes de los sprites al doble y FSR lo lleva a tu pantalla. Bordes limpios, sin dientes de sierra, y gasta menos que subir la resolución interna.");
+		fsrSpritesSwitch.setOnCheckedChangeListener((b, checked) -> {
+			if (checked == fsrSprites()) {
+				return;
+			}
+			prefs.edit().putBoolean(K_FSR_SPRITES + fsrGameKey(), checked).apply();
+			refreshFsr();
+			refreshResolution();
+		});
+		TextView scaleLabel = text("Factor de escala", 15, C_TEXT, true);
+		scaleLabel.setPadding(0, dp(16), 0, 0);
+		fsrOptions.addView(scaleLabel);
 		LinearLayout fsrScaleRow = new LinearLayout(this);
 		fsrScaleRow.setOrientation(LinearLayout.HORIZONTAL);
 		fsrScaleRow.setPadding(0, dp(10), 0, 0);
@@ -3897,6 +3977,35 @@ public class LauncherActivity extends Activity {
 		fsrOptions.addView(fsrSeek, seekParams);
 		TextView sharpHint = text("0 % = sin afinar · 100 % = el máximo de AMD. Lo normal es 70–90 %.", 12, C_MUTED, false);
 		fsrOptions.addView(sharpHint);
+
+		fsrDetailValue = text("", 15, C_ACCENT, true);
+		fsrDetailSeek = fsrSlider(fsrOptions, "Detalle extra (AMD CAS)", fsrDetailValue, K_FSR_DETAIL);
+		fsrOptions.addView(text("Un segundo afinado de AMD que se adapta al contraste: más detalle sin halos. 40–70 % se ve bien; 0 % lo apaga.", 12, C_MUTED, false));
+		fsrColorValue = text("", 15, C_ACCENT, true);
+		fsrColorSeek = fsrSlider(fsrOptions, "Color más vivo", fsrColorValue, K_FSR_COLOR);
+		fsrOptions.addView(text("Más saturación donde el color es débil y un poco más de contraste. 0 % deja los colores del juego.", 12, C_MUTED, false));
+		TextView fsrBest = outlineButton("Poner calidad máxima");
+		fsrBest.setOnClickListener(v -> {
+			// The smallest factor that takes xBR's 960 x 544 to the full size of the game on screen.
+			int[] screen = gameSizeOnScreen();
+			float room = Math.min(screen[0] / (PSP_W * 2f), screen[1] / (PSP_H * 2f));
+			int best = FSR_SCALES[FSR_SCALES.length - 1];
+			for (int value : FSR_SCALES) {
+				if (value / 10f >= room * 0.97f) {
+					best = value;
+					break;
+				}
+			}
+			String k = fsrGameKey();
+			prefs.edit().putBoolean(K_FSR_ON + k, true).putBoolean(K_FSR_SPRITES + k, true).putInt(K_FSR_SCALE + k, best).putInt(K_FSR_SHARP + k, 100)
+				.putInt(K_FSR_DETAIL + k, 70).putInt(K_FSR_COLOR + k, 40).apply();
+			refreshFsr();
+			refreshEffect();
+			refreshResolution();
+		});
+		LinearLayout.LayoutParams bestParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		bestParams.topMargin = dp(14);
+		fsrOptions.addView(fsrBest, bestParams);
 
 		fsrInfo = text("", 13, C_TEXT, false);
 		fsrInfo.setPadding(0, dp(14), 0, 0);
@@ -4102,6 +4211,46 @@ public class LauncherActivity extends Activity {
 		mask.setColor(Color.WHITE);
 		mask.setCornerRadius(dp(radiusDp));
 		return new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), shape, mask);
+	}
+
+	/** A 0-100 % slider of the AMD panel, saved per game under key + game. */
+	private SeekBar fsrSlider(LinearLayout parent, String title, TextView value, final String key) {
+		LinearLayout row = new LinearLayout(this);
+		row.setOrientation(LinearLayout.HORIZONTAL);
+		row.setPadding(0, dp(16), 0, 0);
+		row.addView(text(title, 15, C_TEXT, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		row.addView(value);
+		parent.addView(row);
+		SeekBar seek = new SeekBar(this);
+		seek.setMax(100);
+		if (Build.VERSION.SDK_INT >= 21) {
+			seek.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
+			seek.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
+			seek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF4A4A55));
+		}
+		seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+			@Override
+			public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+				if (!fromUser) {
+					return;
+				}
+				prefs.edit().putInt(key + fsrGameKey(), progress).apply();
+				value.setText(progress == 0 ? "apagado" : sharpLabel(progress));
+				refreshAmdButton();
+			}
+
+			@Override
+			public void onStartTrackingTouch(SeekBar bar) {}
+
+			@Override
+			public void onStopTrackingTouch(SeekBar bar) {
+				refreshFsr();
+			}
+		});
+		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		lp.topMargin = dp(6);
+		parent.addView(seek, lp);
+		return seek;
 	}
 
 	private LinearLayout.LayoutParams weighted(int leftMargin, int rightMargin) {
