@@ -642,10 +642,10 @@ public class LauncherActivity extends Activity {
 			// The mobile look draws the filled and the outline shapes: needs an outline style.
 			ini.append("TouchButtonStyle = 1\n");
 		}
-		if (stickMovement()) {
-			// The joystick starts wherever the thumb lands on it (patches/0007 turns it into the D-pad).
-			ini.append("AutoCenterTouchAnalog = True\n");
-		}
+		// The joystick keeps its center: touching its right side presses right at once, so
+		// tapping forward twice dashes (with a center that follows the thumb, a tap pressed
+		// nothing). patches/0007 turns it into the D-pad.
+		ini.append("AutoCenterTouchAnalog = False\n");
 		if (writeLayout) {
 			appendButtonDefinitions(ini, style, kind);
 		}
@@ -3052,7 +3052,7 @@ public class LauncherActivity extends Activity {
 		styleChip(moveDpad, !stick);
 		styleChip(moveStick, stick);
 		moveDesc.setText(stick
-			? "Joystick: pon el pulgar donde quieras sobre él y arrástralo. Pulsa la cruceta del juego en 8 direcciones, así que sirve igual para los movimientos especiales (↓↘→)."
+			? "Joystick: arrástralo o toca el lado hacia donde quieres ir (dos toques rápidos hacia el rival = correr). Pulsa la cruceta del juego en 8 direcciones, así que sirve igual para los movimientos especiales (↓↘→)."
 			: "Flechas: la cruceta de la PSP, con las diagonales.");
 		controlsPreview.setStick(stick);
 		controlsPreview.setMobile(mobile ? MobileLayout.build(kind, screen[0], screen[1], size, stick) : null, screen[1]);

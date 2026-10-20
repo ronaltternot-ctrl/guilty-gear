@@ -20,7 +20,7 @@ final class MobileLayout {
 	static final long SQUARE = 1L, TRIANGLE = 1L << 1, CIRCLE = 1L << 2, CROSS = 1L << 3, L = 1L << 10, R = 1L << 11;
 
 	// Label images in PPSSPP's customKeyImages: its own letters, then patches/0002 and 0006.
-	static final int IMG_A = 6, IMG_B = 7, IMG_C = 8, IMG_D_LETTER = 9;
+	static final int IMG_A = 6, IMG_B = 7, IMG_C = 8, IMG_D_LETTER = 9, IMG_L = 16, IMG_R = 17;
 	static final int IMG_P = 36, IMG_K = 37, IMG_S = 38, IMG_HS = 39, IMG_D = 40;
 	static final int IMG_LP = 41, IMG_MP = 42, IMG_HP = 43, IMG_LK = 44, IMG_MK = 45, IMG_HK = 46;
 	static final int IMG_RC = 47, IMG_BURST = 48, IMG_ROLL = 49, IMG_CD = 50, IMG_MAX = 51, IMG_VISM = 52;
@@ -56,7 +56,7 @@ final class MobileLayout {
 		boolean stick;                                  // a joystick instead of the D-pad
 		float stickScale, stickSizeDp;                  // same center as the D-pad
 		float startX, startY, selectX, selectY;
-		boolean showL, showR;
+		boolean showL, showR;   // PSP's own shoulder buttons (always off: L and R are round buttons here)
 	}
 
 	private static Button b(String label, long keys, int image) {
@@ -150,9 +150,20 @@ final class MobileLayout {
 		out.selectY = yStartSelect;
 		out.startY = yStartSelect;
 
-		// L (Respect in Guilty Gear) and R stay where they are when a game uses them on their own.
-		out.showL = kind != GameInspector.KIND_SF;
-		out.showR = kind == GameInspector.KIND_BB || kind == GameInspector.KIND_KOF;
+		// L and R as round buttons with the same look (PSP's shoulder buttons stay hidden): L above
+		// the D-pad or joystick, R first in the shortcut row. Guilty Gear only needs L (Respect;
+		// its R is the D button), Street Fighter none (L and R are its heavy attacks).
+		out.showL = false;
+		out.showR = false;
+		final boolean wantL = kind != GameInspector.KIND_SF;
+		final boolean wantR = kind == GameInspector.KIND_BB || kind == GameInspector.KIND_KOF;
+		if (wantL) {
+			final float moveTop = out.dpadY * hDp - out.dpadSizeDp / 2f;
+			place(out, sc("L", L, IMG_L), out.dpadX * wDp, Math.max(m + small / 2f, moveTop - 0.1f * d - small / 2f), small, wDp, hDp);
+		}
+		if (wantR) {
+			place(out, sc("R", R, IMG_R), wDp - m - small / 2f - shortcuts.length * 1.18f * small, yShort, small, wDp, hDp);
+		}
 		return out;
 	}
 
