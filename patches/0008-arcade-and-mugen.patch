@@ -1,0 +1,67 @@
+diff --git a/settings.gradle.kts b/settings.gradle.kts
+--- a/settings.gradle.kts
++++ b/settings.gradle.kts
+@@ -14,6 +14,10 @@
+ 	repositories {
+ 		google()
+ 		mavenCentral()
++		// Launcher build: LibretroDroid (arcade games through the FBNeo core).
++		maven("https://jitpack.io") {
++			content { includeGroupByRegex("com\\.github\\..*") }
++		}
+ 	}
+ }
+ 
+diff --git a/android/build.gradle.kts b/android/build.gradle.kts
+--- a/android/build.gradle.kts
++++ b/android/build.gradle.kts
+@@ -68,6 +68,10 @@
+ 	implementation("androidx.appcompat:appcompat:1.7.1")
+ 	implementation("androidx.documentfile:documentfile:1.1.0")
+ 	implementation("com.google.protobuf:protobuf-javalite:4.33.5")
++	// Launcher build: arcade games (FBNeo libretro core, scripts/fetch_engines.sh) run through
++	// LibretroDroid; its errors and frame events come as Kotlin flows.
++	implementation("com.github.Swordfish90:LibretroDroid:0.14.0")
++	implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+ }
+ 
+ protobuf {
+@@ -177,6 +181,8 @@
+ 			aidl.directories.add("src")
+ 			resources.directories.add("src")
+ 			assets.directories.add("../assets")
++			// Launcher build: engines for the other systems (scripts/fetch_engines.sh).
++			jniLibs.directories.add("extlibs")
+ 		}
+ 		create("normal") {
+ 			res.directories.add("normal/res")
+diff --git a/android/AndroidManifest.xml b/android/AndroidManifest.xml
+--- a/android/AndroidManifest.xml
++++ b/android/AndroidManifest.xml
+@@ -83,6 +83,26 @@
+ 			android:process=":emu"
+ 			android:theme="@style/Theme.ProxyTransparent"
+ 			android:launchMode="standard" />
++        <!-- Arcade / Neo Geo games (FBNeo through LibretroDroid) and MUGEN games (Ikemen GO), each
++             in its own process that ends with the game. -->
++        <activity
++            android:name=".ArcadeActivity"
++            android:process=":arcade"
++            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
++            android:screenOrientation="sensorLandscape"
++            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|layoutDirection|locale|density"
++            android:enableOnBackInvokedCallback="false"
++            android:preferMinimalPostProcessing="true"
++            android:exported="false" />
++        <activity
++            android:name=".MugenActivity"
++            android:process=":mugen"
++            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
++            android:screenOrientation="sensorLandscape"
++            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|layoutDirection|locale|density"
++            android:enableOnBackInvokedCallback="false"
++            android:preferMinimalPostProcessing="true"
++            android:exported="false" />
+         <!-- Lets the launcher share save states (hitbox viewer research). -->
+         <provider
+             android:name="androidx.core.content.FileProvider"

@@ -36,13 +36,33 @@ final class GameCatalog {
 	static final int MAX_GAMES = 40;
 
 	/** Badge of each kind of game in the catalog. */
-	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4;
+	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4, BADGE_ARCADE = 5, BADGE_MUGEN = 6;
 
-	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER" };
-	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E };
+	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER", "ARCADE · NEO GEO", "MUGEN" };
+	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E, 0xFF19B98C, 0xFFA45CFF };
 
 	/** Order of the filters in the catalog ("other" last). */
-	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_OTHER };
+	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_ARCADE, BADGE_MUGEN, BADGE_OTHER };
+
+	/** The system of a catalog entry: "" for PSP, ArcadeLibrary.SYSTEM or MugenInstaller.SYSTEM. */
+	static String system(org.json.JSONObject entry) {
+		return entry == null ? "" : entry.optString("system", "");
+	}
+
+	static boolean isPsp(org.json.JSONObject entry) {
+		return system(entry).isEmpty();
+	}
+
+	static int badge(org.json.JSONObject entry) {
+		String sys = system(entry);
+		if (ArcadeLibrary.SYSTEM.equals(sys)) {
+			return BADGE_ARCADE;
+		}
+		if (MugenInstaller.SYSTEM.equals(sys)) {
+			return BADGE_MUGEN;
+		}
+		return badge(entry.optString("id"), entry.optString("title"));
+	}
 
 	static int badge(String discId, String title) {
 		switch (new GameInspector.Result(null, discId, title).match()) {
@@ -172,7 +192,8 @@ final class GameCatalog {
 
 	/** A cover in the icon's 144:80 shape for games without an icon (or until it loads). */
 	static Bitmap cover(int badge, String title, int widthPx) {
-		String key = badge + "|" + widthPx + "|" + (badge == BADGE_OTHER ? initials(title) : "");
+		boolean named = badge == BADGE_OTHER || badge == BADGE_ARCADE;
+		String key = badge + "|" + widthPx + "|" + (named ? initials(title) : "");
 		Bitmap hit = covers.get(key);
 		if (hit == null) {
 			hit = drawCover(badge, title, widthPx);
@@ -205,6 +226,8 @@ final class GameCatalog {
 			case BADGE_BB: big = "BB"; break;
 			case BADGE_KOF: big = "KOF"; break;
 			case BADGE_SF: big = "SF"; break;
+			case BADGE_MUGEN: big = "MUGEN"; break;
+			case BADGE_ARCADE: big = arcadeBig(title); break;
 			default: big = initials(title); break;
 		}
 		Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -230,6 +253,12 @@ final class GameCatalog {
 		float in = frame.getStrokeWidth() / 2f;
 		c.drawRect(new RectF(in, in, w - in, h - in), frame);
 		return bmp;
+	}
+
+	/** "KOF" for The King of Fighters, otherwise the initials. */
+	private static String arcadeBig(String title) {
+		String t = title == null ? "" : title.toLowerCase(Locale.ROOT);
+		return t.startsWith("the king of fighters") || t.startsWith("kof") ? "KOF" : initials(title);
 	}
 
 	private static String initials(String title) {

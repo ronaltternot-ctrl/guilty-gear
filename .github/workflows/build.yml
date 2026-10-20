@@ -42,6 +42,15 @@ jobs:
       - name: Preparar el código de PPSSPP con los cambios del lanzador
         run: bash scripts/prepare.sh "$GITHUB_WORKSPACE/build/ppsspp"
 
+      - name: Caché de los motores de Arcade y MUGEN
+        uses: actions/cache@v4
+        with:
+          path: build/engine-cache
+          key: engines-${{ hashFiles('scripts/fetch_engines.sh') }}
+
+      - name: Descargar los motores de Arcade (FBNeo) y MUGEN (Ikemen GO)
+        run: bash scripts/fetch_engines.sh "$GITHUB_WORKSPACE/build/ppsspp"
+
       - name: Configurar Java
         uses: actions/setup-java@v5
         with:
@@ -112,3 +121,4 @@ jobs:
             - Motor de emulación: PPSSPP ${{ steps.apk.outputs.ppsspp }}.
             - Arquitecturas incluidas: `${{ env.ABIS }}`.
             - El juego no viene incluido: la app te pide tu copia (ISO o CSO) la primera vez.
+            - Arcade / Neo Geo con FBNeo y juegos MUGEN con Ikemen GO 1.0: tampoco incluye juegos ni BIOS.

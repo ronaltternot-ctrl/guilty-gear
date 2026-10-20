@@ -70,6 +70,9 @@ public class LauncherActivity extends Activity {
 	private static final String TAG = "AcPlusLauncher";
 	private static final int REQUEST_PICK_GAME = 4201;
 	private static final int REQUEST_ADD_GAMES = 4202;
+	private static final int REQUEST_ADD_ARCADE = 4203;
+	private static final int REQUEST_ADD_MUGEN_FOLDER = 4204;
+	private static final int REQUEST_ADD_MUGEN_ZIP = 4205;
 
 	private static final String PREFS = "launcher";
 	private static final String K_URI = "game_uri";
@@ -448,6 +451,18 @@ public class LauncherActivity extends Activity {
 		if (requestCode == REQUEST_ADD_GAMES) {
 			if (resultCode == RESULT_OK && data != null) {
 				onGamesAdded(data);
+			}
+			return;
+		}
+		if (requestCode == REQUEST_ADD_ARCADE) {
+			if (resultCode == RESULT_OK && data != null) {
+				onArcadeAdded(data);
+			}
+			return;
+		}
+		if (requestCode == REQUEST_ADD_MUGEN_FOLDER || requestCode == REQUEST_ADD_MUGEN_ZIP) {
+			if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+				onMugenPicked(data.getData(), requestCode == REQUEST_ADD_MUGEN_FOLDER);
 			}
 			return;
 		}
@@ -1556,8 +1571,13 @@ public class LauncherActivity extends Activity {
 			"Botones Neo Geo A B C D, gestos (cadena A → B → C → D, CD, Roll y MAX), HUD propio (vida, POW y tiempo) en las cinco entregas, perfiles por personaje en '96, '97 y '98 (versión americana), efectos y FSR." },
 		{ "Street Fighter Alpha 3 MAX", "ULUS-10062 · ULES-00235 · ULJM-05082 (Zero 3 Double Upper)",
 			"Botones arcade de 6 (LP MP HP / LK MK HK), gestos (cadena LP → MP → HP, V-ISM y Alpha Counter), HUD propio (vida, súper, guardia y tiempo), efectos y FSR. Sin perfiles por personaje por ahora." },
+		{ "The King of Fighters 2002 (Arcade / Neo Geo)", "kof2002.zip + neogeo.zip · también Magic Plus, Plus y otros juegos de FBNeo",
+			"Emulador FBNeo con controles táctiles A B C D y atajos AB, CD, BC y ABC, flechas o joystick, estados guardados, filtros de imagen y modo MVS (arcade) o AES (consola). Las versiones hack necesitan también kof2002.zip." },
+		{ "Juegos MUGEN (KOF 2012 fan made y otros)", "Carpeta o .zip del juego · motor Ikemen GO 1.0",
+			"Ikemen GO abre los juegos hechos para MUGEN 1.0 / 1.1 con su pantalla de título, selección y peleas. Controles táctiles en diseño KOF (A B C D) o de 6 botones. Necesita Android 13 o más nuevo y una GPU con OpenGL ES 3.2." },
 	};
-	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF, GameCatalog.BADGE_SF };
+	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF, GameCatalog.BADGE_SF,
+		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_MUGEN };
 
 	/** ImageView with the shape of a PSP game icon (144 x 80). */
 	private static final class IconView extends ImageView {
@@ -1658,7 +1678,7 @@ public class LauncherActivity extends Activity {
 
 		int total = lib.length();
 		String sub = total == 0 ? "Aún no has añadido juegos."
-			: total + (total == 1 ? " juego" : " juegos") + " · toca uno para elegirlo, mantén pulsado para quitarlo del catálogo (el archivo no se borra).";
+			: total + (total == 1 ? " juego" : " juegos") + " · toca uno para elegirlo (los de Arcade y MUGEN se abren al tocarlos), mantén pulsado para quitarlo del catálogo.";
 		if (addingGames > 0) {
 			sub = "Leyendo " + addingGames + (addingGames == 1 ? " archivo…" : " archivos…") + "\n" + sub;
 		}
@@ -1675,12 +1695,30 @@ public class LauncherActivity extends Activity {
 		addHint.setPadding(0, dp(6), 0, 0);
 		col.addView(addHint);
 
+		// Other systems: arcade (FBNeo) and MUGEN (Ikemen GO).
+		LinearLayout others = new LinearLayout(this);
+		others.setOrientation(LinearLayout.HORIZONTAL);
+		TextView addArcade = outlineButton("+  Arcade / Neo Geo");
+		addArcade.setOnClickListener(v -> pickArcade());
+		TextView addMugen = outlineButton("+  Juego MUGEN");
+		addMugen.setOnClickListener(v -> pickMugen());
+		others.addView(addArcade, weighted(0, dp(6)));
+		others.addView(addMugen, weighted(dp(6), 0));
+		LinearLayout.LayoutParams othersLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		othersLp.topMargin = dp(12);
+		col.addView(others, othersLp);
+		TextView othersHint = text("Arcade: los ZIP del juego (kof2002.zip…) y la BIOS neogeo.zip, con el emulador FBNeo. "
+			+ "MUGEN: la carpeta o el .zip de un juego MUGEN (por ejemplo un KOF 2012 fan made), con el motor Ikemen GO. "
+			+ "Se copian dentro de la app.", 12, 0xFF6C6C78, false);
+		othersHint.setPadding(0, dp(6), 0, 0);
+		col.addView(othersHint);
+
 		// Filter by game
 		int[] counts = new int[GameCatalog.BADGE_NAMES.length];
 		for (int i = 0; i < total; i++) {
 			org.json.JSONObject e = lib.optJSONObject(i);
 			if (e != null) {
-				counts[GameCatalog.badge(e.optString("id"), e.optString("title"))]++;
+				counts[GameCatalog.badge(e)]++;
 			}
 		}
 		if (catalogFilter >= 0 && counts[catalogFilter] == 0) {
@@ -1700,7 +1738,7 @@ public class LauncherActivity extends Activity {
 			for (int b : GameCatalog.BADGE_ORDER) {
 				if (counts[b] > 0) {
 					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF"
-						: b == GameCatalog.BADGE_SF ? "Street Fighter" : "Otros") + " · " + counts[b]);
+						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : "Otros") + " · " + counts[b]);
 				}
 			}
 			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1715,7 +1753,7 @@ public class LauncherActivity extends Activity {
 		int n = 0;
 		for (int i = 0; i < total; i++) {
 			org.json.JSONObject e = lib.optJSONObject(i);
-			if (e == null || (catalogFilter >= 0 && GameCatalog.badge(e.optString("id"), e.optString("title")) != catalogFilter)) {
+			if (e == null || (catalogFilter >= 0 && GameCatalog.badge(e) != catalogFilter)) {
 				continue;
 			}
 			if (n % columns == 0) {
@@ -1726,8 +1764,13 @@ public class LauncherActivity extends Activity {
 				col.addView(row, rlp);
 			}
 			String uri = e.optString("uri");
-			boolean access = !"content".equals(Uri.parse(uri).getScheme()) || readable.contains(uri);
 			int k = n % columns;
+			if (!GameCatalog.isPsp(e)) {
+				row.addView(otherSystemTile(e), weighted(k == 0 ? 0 : dp(6), k == columns - 1 ? 0 : dp(6)));
+				n++;
+				continue;
+			}
+			boolean access = !"content".equals(Uri.parse(uri).getScheme()) || readable.contains(uri);
 			row.addView(catalogTile(e, uri.equals(current), access), weighted(k == 0 ? 0 : dp(6), k == columns - 1 ? 0 : dp(6)));
 			n++;
 		}
@@ -1753,9 +1796,9 @@ public class LauncherActivity extends Activity {
 		for (int g = 0; g < SUPPORTED_GAMES.length; g++) {
 			col.addView(supportedCard(g, counts[SUPPORTED_BADGES[g]] > 0), cardParams());
 		}
-		TextView others = text("Cualquier otro juego de PSP también arranca, con los botones de PSP, los efectos visuales y FSR.", 12, 0xFF6C6C78, false);
-		others.setPadding(0, dp(12), 0, 0);
-		col.addView(others);
+		TextView otherPsp = text("Cualquier otro juego de PSP también arranca, con los botones de PSP, los efectos visuales y FSR.", 12, 0xFF6C6C78, false);
+		otherPsp.setPadding(0, dp(12), 0, 0);
+		col.addView(otherPsp);
 	}
 
 	private void addFilterChip(LinearLayout chips, final int badge, String label) {
@@ -1854,6 +1897,391 @@ public class LauncherActivity extends Activity {
 		});
 		tile.setContentDescription((title.isEmpty() ? e.optString("name") : title) + (selected ? ", elegido" : ""));
 		return tile;
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// Other systems: arcade games (FBNeo, ArcadeActivity) and MUGEN games (Ikemen GO, MugenActivity)
+
+	private View otherSystemTile(final org.json.JSONObject e) {
+		final boolean arcade = ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e));
+		final String title = e.optString("title", e.optString("name"));
+		int badge = GameCatalog.badge(e);
+		LinearLayout tile = new LinearLayout(this);
+		tile.setOrientation(LinearLayout.VERTICAL);
+		tile.setPadding(dp(8), dp(8), dp(8), dp(10));
+		tile.setBackground(ripple(C_CARD, C_STROKE, 14));
+		makeClickable(tile);
+
+		IconView img = new IconView(this);
+		GradientDrawable round = new GradientDrawable();
+		round.setColor(0xFF101015);
+		round.setCornerRadius(dp(10));
+		img.setBackground(round);
+		img.setClipToOutline(true);
+		img.setImageBitmap(GameCatalog.cover(badge, title, dp(120)));
+		FrameLayout pic = new FrameLayout(this);
+		pic.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+		TextView play = text("▶ JUGAR", 10, Color.WHITE, true);
+		play.setLetterSpacing(0.1f);
+		play.setPadding(dp(7), dp(3), dp(7), dp(3));
+		GradientDrawable pill = new GradientDrawable();
+		pill.setColor(GameCatalog.BADGE_COLORS[badge]);
+		pill.setCornerRadius(dp(8));
+		play.setBackground(pill);
+		FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+		plp.setMargins(dp(6), dp(6), 0, 0);
+		pic.addView(play, plp);
+		tile.addView(pic);
+
+		TextView name = text(title, 14, C_TEXT, true);
+		name.setMaxLines(2);
+		name.setEllipsize(TextUtils.TruncateAt.END);
+		name.setPadding(0, dp(8), 0, 0);
+		tile.addView(name);
+		TextView kind = text("●  " + GameCatalog.BADGE_NAMES[badge], 10, GameCatalog.BADGE_COLORS[badge], true);
+		kind.setLetterSpacing(0.12f);
+		kind.setPadding(0, dp(4), 0, 0);
+		tile.addView(kind);
+		File file = otherFile(e);
+		boolean there = file != null && file.exists();
+		TextView detail = text(there ? (arcade ? e.optString("name") + " · FBNeo" : "Ikemen GO · " + e.optString("name"))
+			: "⚠ Ya no está en la app: vuelve a añadirlo", 11, there ? C_MUTED : C_WARN, false);
+		detail.setMaxLines(1);
+		detail.setEllipsize(TextUtils.TruncateAt.END);
+		detail.setPadding(0, dp(2), 0, 0);
+		tile.addView(detail);
+
+		tile.setOnClickListener(v -> playOther(e));
+		tile.setOnLongClickListener(v -> {
+			confirmRemoveOther(e);
+			return true;
+		});
+		tile.setContentDescription(title + ", " + GameCatalog.BADGE_NAMES[badge]);
+		return tile;
+	}
+
+	/** The copy inside the app: the ROM zip, or the MUGEN game's folder. */
+	private static File otherFile(org.json.JSONObject e) {
+		String uri = e.optString("uri");
+		if (uri.isEmpty()) {
+			return null;
+		}
+		String path = Uri.parse(uri).getPath();
+		return path == null ? null : new File(path);
+	}
+
+	private void playOther(org.json.JSONObject e) {
+		if (findEmuPid() > 0) {
+			showMessage("Hay una partida de PSP abierta", "Cierra la partida en curso (botón «Cerrar partida» de arriba) antes de abrir otro juego.");
+			return;
+		}
+		File f = otherFile(e);
+		if (f == null || !f.exists()) {
+			showMessage("No encuentro el juego", "La copia que guardó la app ya no está. Quítalo del catálogo (mantén pulsado) y vuelve a añadirlo.");
+			return;
+		}
+		String title = e.optString("title", e.optString("name"));
+		if (ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e))) {
+			String set = ArcadeLibrary.setName(f.getName());
+			if (ArcadeLibrary.looksNeoGeo(set) && !ArcadeLibrary.hasNeoGeoBios(this)) {
+				new AlertDialog.Builder(this)
+					.setTitle("Falta la BIOS de Neo Geo")
+					.setMessage("«" + title + "» es de Neo Geo y FBNeo necesita también neogeo.zip. Añádelo con «+ Arcade / Neo Geo» en el catálogo.")
+					.setPositiveButton("Añadir neogeo.zip", (d, w) -> pickArcade())
+					.setNegativeButton("Probar igual", (d, w) -> startArcade(f, title))
+					.show();
+				return;
+			}
+			startArcade(f, title);
+		} else {
+			startMugen(f, title);
+		}
+	}
+
+	private void startArcade(File rom, String title) {
+		Intent i = new Intent(this, ArcadeActivity.class);
+		i.putExtra(ArcadeActivity.EXTRA_ROM, rom.getAbsolutePath());
+		i.putExtra(ArcadeActivity.EXTRA_TITLE, title);
+		try {
+			startActivity(i);
+		} catch (RuntimeException ex) {
+			Log.w(TAG, "Arcade", ex);
+			showMessage("No se pudo abrir el juego", String.valueOf(ex.getMessage()));
+		}
+	}
+
+	private void startMugen(final File root, final String title) {
+		if (!MugenInstaller.engineBundled(this)) {
+			showMessage("Falta el motor MUGEN", "Esta versión de la app no trae Ikemen GO. Instala la última versión.");
+			return;
+		}
+		ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+		int gles = am == null ? 0 : am.getDeviceConfigurationInfo().reqGlEsVersion;
+		String problem = null;
+		if (Build.VERSION.SDK_INT < 29) {
+			showMessage("Android demasiado viejo", "Ikemen GO, el motor de los juegos MUGEN, necesita Android 13 o más nuevo (tu teléfono tiene Android "
+				+ Build.VERSION.RELEASE + ").");
+			return;
+		} else if (Build.VERSION.SDK_INT < 33) {
+			problem = "Ikemen GO pide Android 13 o más nuevo y tu teléfono tiene Android " + Build.VERSION.RELEASE + ". Puede que no arranque.";
+		} else if (gles != 0 && gles < 0x30002) {
+			problem = "Ikemen GO necesita una GPU con OpenGL ES 3.2 y tu teléfono indica OpenGL ES " + (gles >> 16) + "." + (gles & 0xFFFF) + ". Puede que no arranque.";
+		}
+		Runnable go = () -> {
+			Intent i = new Intent(this, MugenActivity.class);
+			i.putExtra(MugenActivity.EXTRA_PATH, root.getAbsolutePath());
+			i.putExtra(MugenActivity.EXTRA_TITLE, title);
+			try {
+				startActivity(i);
+			} catch (RuntimeException ex) {
+				Log.w(TAG, "MUGEN", ex);
+				showMessage("No se pudo abrir el juego", String.valueOf(ex.getMessage()));
+			}
+		};
+		if (problem != null) {
+			new AlertDialog.Builder(this)
+				.setTitle("Tu teléfono podría no ser compatible")
+				.setMessage(problem)
+				.setPositiveButton("Probar igual", (d, w) -> go.run())
+				.setNegativeButton("Cancelar", null)
+				.show();
+		} else {
+			go.run();
+		}
+	}
+
+	private void confirmRemoveOther(final org.json.JSONObject e) {
+		final File f = otherFile(e);
+		final boolean arcade = ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e));
+		// The whole folder the import created (the game can be a folder or two inside it).
+		File top = f;
+		if (!arcade && f != null) {
+			File games = MugenInstaller.gamesDir(this);
+			File cur = f;
+			while (cur != null && cur.getParentFile() != null && !games.equals(cur.getParentFile())) {
+				cur = cur.getParentFile();
+			}
+			top = cur != null && games.equals(cur.getParentFile()) ? cur : f;
+		}
+		final File remove = top;
+		long bytes = remove == null ? 0 : (arcade ? remove.length() : MugenInstaller.sizeOf(remove));
+		String title = e.optString("title", e.optString("name"));
+		new AlertDialog.Builder(this)
+			.setTitle("¿Quitar del catálogo?")
+			.setMessage(title + "\n\nSe borra la copia que guardó la app (" + String.format(Locale.ROOT, "%.0f MB", bytes / 1048576.0)
+				+ ")" + (arcade ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
+			.setPositiveButton("Quitar y borrar", (d, w) -> {
+				org.json.JSONArray lib = loadLibrary();
+				org.json.JSONArray out = new org.json.JSONArray();
+				for (int i = 0; i < lib.length(); i++) {
+					org.json.JSONObject x = lib.optJSONObject(i);
+					if (x != null && !x.optString("uri").equals(e.optString("uri"))) {
+						out.put(x);
+					}
+				}
+				prefs.edit().putString(K_LIBRARY, out.toString()).apply();
+				refreshLibrary();
+				if (remove != null) {
+					new Thread(() -> MugenInstaller.deleteTree(remove), "RemoveGame").start();
+				}
+			})
+			.setNegativeButton("Cancelar", null)
+			.show();
+	}
+
+	private void pickArcade() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+		try {
+			startActivityForResult(intent, REQUEST_ADD_ARCADE);
+		} catch (ActivityNotFoundException ex) {
+			showMessage("Sin selector de archivos", "Tu teléfono no tiene un selector de archivos disponible.");
+		}
+	}
+
+	private android.app.ProgressDialog progressDialog(String title) {
+		android.app.ProgressDialog pd = new android.app.ProgressDialog(this);
+		pd.setTitle(title);
+		pd.setMessage("Un momento…");
+		pd.setCancelable(false);
+		pd.show();
+		getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		return pd;
+	}
+
+	private void doneProgress(android.app.ProgressDialog pd) {
+		getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		try {
+			pd.dismiss();
+		} catch (RuntimeException ignored) {
+			// Activity going away.
+		}
+	}
+
+	/** «+ Arcade / Neo Geo»: copies each ZIP into the app; games go to the catalog, BIOS sets stay next to them. */
+	private void onArcadeAdded(Intent data) {
+		final List<Uri> uris = new ArrayList<>();
+		ClipData clip = data.getClipData();
+		if (clip != null) {
+			for (int i = 0; i < clip.getItemCount(); i++) {
+				Uri u = clip.getItemAt(i).getUri();
+				if (u != null) {
+					uris.add(u);
+				}
+			}
+		} else if (data.getData() != null) {
+			uris.add(data.getData());
+		}
+		if (uris.isEmpty()) {
+			return;
+		}
+		final android.app.ProgressDialog pd = progressDialog("Copiando juegos de arcade");
+		final android.content.Context app = getApplicationContext();
+		new Thread(() -> {
+			final List<org.json.JSONObject> added = new ArrayList<>();
+			final List<String> bios = new ArrayList<>();
+			final List<String> skipped = new ArrayList<>();
+			for (Uri u : uris) {
+				final String name = ArcadeLibrary.displayName(app, u);
+				if (!ArcadeLibrary.isArchive(name)) {
+					skipped.add(name + " (no es .zip ni .7z)");
+					continue;
+				}
+				handler.post(() -> pd.setMessage("Copiando " + name + "…"));
+				try {
+					File f = ArcadeLibrary.copyIn(app, u, name);
+					String set = ArcadeLibrary.setName(f.getName());
+					if (ArcadeLibrary.isBios(set)) {
+						bios.add(f.getName());
+						continue;
+					}
+					added.add(new org.json.JSONObject()
+						.put("system", ArcadeLibrary.SYSTEM)
+						.put("uri", Uri.fromFile(f).toString())
+						.put("name", f.getName())
+						.put("title", ArcadeLibrary.title(set))
+						.put("id", set)
+						.put("format", "ZIP"));
+				} catch (Throwable t) {
+					Log.w(TAG, "Arcade copy " + name, t);
+					skipped.add(name + " (" + t.getMessage() + ")");
+				}
+			}
+			handler.post(() -> {
+				doneProgress(pd);
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				for (int i = added.size() - 1; i >= 0; i--) {
+					putInLibrary(added.get(i), true);
+				}
+				refreshLibrary();
+				StringBuilder msg = new StringBuilder();
+				if (!added.isEmpty()) {
+					msg.append(added.size() == 1 ? "Se añadió 1 juego de arcade." : "Se añadieron " + added.size() + " juegos de arcade.");
+				}
+				if (!bios.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n" : "").append("BIOS guardada: ").append(TextUtils.join(", ", bios)).append('.');
+				}
+				boolean needsBios = false;
+				for (org.json.JSONObject e : added) {
+					needsBios |= ArcadeLibrary.looksNeoGeo(e.optString("id"));
+				}
+				if (needsBios && !ArcadeLibrary.hasNeoGeoBios(this)) {
+					msg.append(msg.length() > 0 ? "\n\n" : "").append("⚠ Los juegos de Neo Geo necesitan también la BIOS neogeo.zip: añádela con «+ Arcade / Neo Geo».");
+				}
+				if (!skipped.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n\n" : "").append("No se añadieron:\n").append(TextUtils.join("\n", skipped));
+				}
+				if (msg.length() > 0) {
+					showMessage("Arcade / Neo Geo", msg.toString());
+				}
+			});
+		}, "ArcadeAdd").start();
+	}
+
+	private void pickMugen() {
+		new AlertDialog.Builder(this)
+			.setTitle("Añadir un juego MUGEN")
+			.setMessage("Elige la carpeta del juego (la que tiene «chars», «data» y «stages») o su archivo .zip. "
+				+ "Si viene en .rar o .7z, descomprímelo primero (por ejemplo con ZArchiver) y elige la carpeta.\n\n"
+				+ "Se copia dentro de la app; los juegos grandes tardan unos minutos.")
+			.setPositiveButton("Elegir carpeta", (d, w) -> {
+				Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+				try {
+					startActivityForResult(intent, REQUEST_ADD_MUGEN_FOLDER);
+				} catch (ActivityNotFoundException ex) {
+					showMessage("Sin selector de carpetas", "Tu teléfono no tiene un selector de carpetas disponible.");
+				}
+			})
+			.setNeutralButton("Elegir .zip", (d, w) -> {
+				Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+				intent.addCategory(Intent.CATEGORY_OPENABLE);
+				intent.setType("*/*");
+				try {
+					startActivityForResult(intent, REQUEST_ADD_MUGEN_ZIP);
+				} catch (ActivityNotFoundException ex) {
+					showMessage("Sin selector de archivos", "Tu teléfono no tiene un selector de archivos disponible.");
+				}
+			})
+			.setNegativeButton("Cancelar", null)
+			.show();
+	}
+
+	private void onMugenPicked(final Uri uri, final boolean folder) {
+		final android.content.Context app = getApplicationContext();
+		final String name = folder ? null : ArcadeLibrary.displayName(app, uri);
+		if (!folder && name != null && !name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+			showMessage("Ese archivo no es .zip", "Elige un .zip, o descomprime el juego (por ejemplo con ZArchiver) y elige su carpeta.");
+			return;
+		}
+		final android.app.ProgressDialog pd = progressDialog("Copiando el juego MUGEN");
+		final MugenInstaller.Progress progress = (what, done, total) -> handler.post(() -> {
+			if (total > 0) {
+				pd.setMessage(String.format(Locale.ROOT, "%d %%  ·  %s", Math.min(100, done * 100 / total), what));
+			} else {
+				pd.setMessage(done + " archivos  ·  " + what);
+			}
+		});
+		new Thread(() -> {
+			File root = null;
+			String error = null;
+			try {
+				root = folder ? MugenInstaller.importTree(app, uri, progress) : MugenInstaller.importZip(app, uri, name, progress);
+			} catch (Throwable t) {
+				Log.w(TAG, "MUGEN import", t);
+				error = t.getMessage() == null ? t.toString() : t.getMessage();
+			}
+			final File gameRoot = root;
+			final String err = error;
+			handler.post(() -> {
+				doneProgress(pd);
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				if (gameRoot == null) {
+					showMessage("No se pudo añadir el juego", err == null ? "Error desconocido." : err);
+					return;
+				}
+				String title = gameRoot.getName();
+				try {
+					org.json.JSONObject entry = new org.json.JSONObject()
+						.put("system", MugenInstaller.SYSTEM)
+						.put("uri", Uri.fromFile(gameRoot).toString())
+						.put("name", gameRoot.getName())
+						.put("title", title)
+						.put("id", "MUGEN")
+						.put("format", "MUGEN");
+					putInLibrary(entry, true);
+				} catch (org.json.JSONException ex) {
+					Log.w(TAG, "MUGEN entry", ex);
+				}
+				refreshLibrary();
+				Toast.makeText(this, "«" + title + "» está en el catálogo", Toast.LENGTH_LONG).show();
+			});
+		}, "MugenAdd").start();
 	}
 
 	private View supportedCard(int g, boolean owned) {
@@ -2578,9 +3006,20 @@ public class LauncherActivity extends Activity {
 		+ "Pesos de la red NNEDI3 (tritical), tomados de los shaders de PPSSPP.\n\n"
 		+ "■ Letras P, K, S, HS y D\n"
 		+ "Dibujadas con Roboto Condensed (Google), licencia Apache 2.0, que ya incluye PPSSPP.\n\n"
-		+ "■ Guilty Gear\n"
-		+ "Guilty Gear es una marca de Arc System Works. Este proyecto no está afiliado ni respaldado por Arc System Works "
-		+ "y no incluye ningún archivo del juego.";
+		+ "■ FBNeo (Arcade / Neo Geo)\n"
+		+ "FinalBurn Neo, del equipo de FBNeo (github.com/finalburnneo/FBNeo), en su versión libretro compilada por Lemuroid "
+		+ "(github.com/Swordfish90/LemuroidCores). Licencia de FBNeo: uso no comercial. La app es gratis.\n\n"
+		+ "■ LibretroDroid\n"
+		+ "Frontend libretro para Android de Filippo Scognamiglio (github.com/Swordfish90/LibretroDroid). Licencia GPL 3.0.\n\n"
+		+ "■ Ikemen GO (MUGEN)\n"
+		+ "Motor de juegos de pelea compatible con MUGEN, del equipo de Ikemen GO (github.com/ikemen-engine/Ikemen-GO), "
+		+ "versión 1.0.0 para Android. Licencia MIT; sus archivos de pantalla bajo Creative Commons. Usa SDL 2 (licencia zlib, "
+		+ "con el código Java de ikemen-droid, modificado), FFmpeg (LGPL 2.1, enlazado dinámicamente) y libxmp. "
+		+ "La lista completa está en assets/ikemen/LICENSES.txt dentro de la app.\n\n"
+		+ "■ Juegos\n"
+		+ "Guilty Gear es una marca de Arc System Works; BlazBlue, de Arc System Works; The King of Fighters, Metal Slug y Neo Geo, de SNK; "
+		+ "Street Fighter, de Capcom. Este proyecto no está afiliado ni respaldado por ninguna de ellas y no incluye ningún archivo "
+		+ "de sus juegos ni BIOS: cada jugador usa sus propias copias. Los juegos MUGEN son de sus autores.";
 
 	/** A special move button's input: chosen in the launcher, or the character's default. */
 	private static String gestureKey(int id, int slot) {
