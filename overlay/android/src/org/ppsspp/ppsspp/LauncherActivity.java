@@ -1984,10 +1984,33 @@ public class LauncherActivity extends Activity {
 		}
 		String title = e.optString("title", e.optString("name"));
 		if (ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e))) {
+			// Added with another name ("The King of Fighters 2002 (NGM-2650)(NGH-2650).zip", or by
+			// version 1.0.18, which didn't rename): FBNeo only knows a game by its set name.
+			String set = ArcadeLibrary.setName(f.getName());
+			if (ArcadeCheck.info(this, set) == null && !ArcadeLibrary.isBios(set)) {
+				ArcadeCheck.SetInfo match = ArcadeCheck.identify(this, ArcadeCheck.zipCrcs(f));
+				if (match != null && !"neogeo".equals(match.name)) {
+					try {
+						File renamed = ArcadeLibrary.renameTo(f, match.name);
+						String newTitle = ArcadeCheck.title(this, match.name);
+						org.json.JSONObject ne = new org.json.JSONObject(e.toString())
+							.put("uri", Uri.fromFile(renamed).toString())
+							.put("name", renamed.getName())
+							.put("title", newTitle)
+							.put("id", match.name);
+						replaceInLibrary(e.optString("uri"), ne);
+						Toast.makeText(this, "Es «" + newTitle + "»: se guardó como " + renamed.getName() + ", el nombre que busca FBNeo", Toast.LENGTH_LONG).show();
+						playOther(ne);
+						return;
+					} catch (IOException | org.json.JSONException ex) {
+						Log.w(TAG, "Rename " + f, ex);
+					}
+				}
+			}
 			ArcadeCheck.Report r = ArcadeCheck.check(this, f);
 			String problems = r.ok() ? "" : r.describe(f.getName()).trim();
-			if (r.info == null && !ArcadeLibrary.looksNeoGeo(r.set)) {
-				problems = "";   // Another board (CPS…): nothing to check here.
+			if (r.info == null && !ArcadeLibrary.looksNeoGeo(r.set) && ArcadeLibrary.looksLikeSetName(r.set)) {
+				problems = "";   // Another board (CPS…) with a proper set name: nothing to check here.
 			}
 			if (!problems.isEmpty()) {
 				new AlertDialog.Builder(this)
@@ -2003,6 +2026,21 @@ public class LauncherActivity extends Activity {
 		} else {
 			startMugen(f, title);
 		}
+	}
+
+	/** Replaces the catalog entry of a game (same position). */
+	private void replaceInLibrary(String oldUri, org.json.JSONObject entry) {
+		org.json.JSONArray lib = loadLibrary();
+		org.json.JSONArray out = new org.json.JSONArray();
+		for (int i = 0; i < lib.length(); i++) {
+			org.json.JSONObject x = lib.optJSONObject(i);
+			if (x == null) {
+				continue;
+			}
+			out.put(x.optString("uri").equals(oldUri) ? entry : x);
+		}
+		prefs.edit().putString(K_LIBRARY, out.toString()).apply();
+		refreshLibrary();
 	}
 
 	private void startArcade(File rom, String title) {

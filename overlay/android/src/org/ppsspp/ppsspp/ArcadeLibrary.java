@@ -164,7 +164,20 @@ final class ArcadeLibrary {
 				return true;
 			}
 		}
+		// Full titles, as ROM sites name the files ("The King of Fighters 2002 (NGM-2650)(NGH-2650)").
+		String[] words = { "king of fighters", "metal slug", "samurai shodown", "garou", "fatal fury", "art of fighting", "last blade",
+			"neo geo", "neogeo", "ngm-", "ngh-" };
+		for (String w : words) {
+			if (set.contains(w)) {
+				return true;
+			}
+		}
 		return false;
+	}
+
+	/** FBNeo's set names are short, lower case, letters, digits and _ (kof2002, kf2k2mp). */
+	static boolean looksLikeSetName(String set) {
+		return set.matches("[a-z0-9_]{1,20}");
 	}
 
 	static boolean hasNeoGeoBios(Context c) {
