@@ -42,17 +42,26 @@ import kotlinx.coroutines.GlobalScope;
 import kotlinx.coroutines.flow.FlowKt;
 
 /**
- * Arcade / Neo Geo games with the FBNeo libretro core (Lemuroid's build, in the APK as
- * libfbneo_libretro_android.so) through LibretroDroid. Runs in its own process (":arcade"), which
- * ends with the game, so each game starts with a clean core.
+ * Games that run on a libretro core through LibretroDroid: arcade / Neo Geo with FBNeo and
+ * PlayStation 1 with PCSX ReARMed (Lemuroid's builds, in the APK as lib*_libretro_android.so).
+ * Runs in its own process (":arcade"), which ends with the game, so each game starts with a
+ * clean core.
  */
 public class ArcadeActivity extends ComponentActivity implements TouchPadView.Listener {
 	private static final String TAG = "ArcadeActivity";
 
 	static final String EXTRA_ROM = "rom";
 	static final String EXTRA_TITLE = "title";
+	/** ArcadeLibrary.SYSTEM (default) or PsxLibrary.SYSTEM. */
+	static final String EXTRA_SYSTEM = "system";
 
 	private static final String CORE = "libfbneo_libretro_android.so";
+	private static final String CORE_PSX = "libpcsx_rearmed_libretro_android.so";
+
+	// PlayStation: the RetroPad is the PlayStation pad (✕ = B, ○ = A, □ = Y, △ = X).
+	private static final int PS_CROSS = KeyEvent.KEYCODE_BUTTON_B, PS_CIRCLE = KeyEvent.KEYCODE_BUTTON_A;
+	private static final int PS_SQUARE = KeyEvent.KEYCODE_BUTTON_Y, PS_TRIANGLE = KeyEvent.KEYCODE_BUTTON_X;
+	private static final int C_TRIANGLE = 0xFF3FD69B, C_CIRCLE = 0xFFFF5A64, C_CROSS = 0xFF6FA8FF, C_SQUARE = 0xFFF27FD0;
 
 	// FBNeo's "classic" RetroPad for the Neo Geo: A, B, C, D are the RetroPad's B, A, Y, X.
 	// LibretroDroid turns Android's BUTTON_A..Y into the RetroPad's A..Y.
@@ -75,12 +84,14 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private TextView status;
 	private File rom, saves, states;
 	private String set, title;
+	private boolean psx;
 	private boolean started, failed, menuOpen, paused;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		prefs = getSharedPreferences("arcade", MODE_PRIVATE);
+		psx = PsxLibrary.SYSTEM.equals(getIntent().getStringExtra(EXTRA_SYSTEM));
+		prefs = getSharedPreferences(psx ? "psx" : "arcade", MODE_PRIVATE);
 		goFullscreen();
 
 		FrameLayout root = new FrameLayout(this);
@@ -94,12 +105,13 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			return;
 		}
 		rom = new File(path);
-		set = ArcadeLibrary.setName(rom.getName());
+		// The name saves and states go by: the ROM set, or the PS1 game's folder.
+		set = psx ? rom.getParentFile().getName().replaceAll("[^A-Za-z0-9._()\\-]", "_") : ArcadeLibrary.setName(rom.getName());
 		if (title == null || title.isEmpty()) {
-			title = ArcadeCheck.title(this, set);
+			title = psx ? PsxLibrary.title(rom.getName()) : ArcadeCheck.title(this, set);
 		}
 		GameRun.begin(this, ":arcade", title, rom.getName() + " (" + (rom.length() / 1048576) + " MB)");
-		File base = new File(getFilesDir(), "arcade");
+		File base = new File(getFilesDir(), psx ? "psx" : "arcade");
 		File system = new File(base, "system");
 		saves = new File(base, "saves");
 		states = new File(base, "states");
@@ -109,9 +121,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			}
 		}
 
-		File coreFile = new File(getApplicationInfo().nativeLibraryDir, CORE);
+		String coreName = psx ? CORE_PSX : CORE;
+		File coreFile = new File(getApplicationInfo().nativeLibraryDir, coreName);
 		GLRetroViewData data = new GLRetroViewData(this);
-		data.setCoreFilePath(coreFile.isFile() ? coreFile.getAbsolutePath() : CORE);
+		data.setCoreFilePath(coreFile.isFile() ? coreFile.getAbsolutePath() : coreName);
 		data.setGameFilePath(rom.getAbsolutePath());
 		data.setSystemDirectory(system.getAbsolutePath());
 		data.setSavesDirectory(saves.getAbsolutePath());
@@ -156,6 +169,14 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private Variable[] variables() {
+		if (psx) {
+			return new Variable[] {
+				// The real BIOS when the player added one (system folder), else the built-in one.
+				new Variable("pcsx_rearmed_bios", "auto", null),
+				new Variable("pcsx_rearmed_drc", "enabled", null),
+				new Variable("pcsx_rearmed_neon_enhancement_enable", prefs.getBoolean("hires", false) ? "enabled" : "disabled", null),
+			};
+		}
 		boolean aes = "aes".equals(prefs.getString("neogeo_mode", "mvs"));
 		return new Variable[] {
 			// MVS (arcade, with coins) or AES (the home console: no coins, saves on the memory card).
@@ -182,6 +203,30 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private void applyPadSettings() {
+		if (psx) {
+			pad.setDiamond(
+				new TouchPadView.Spec("△", C_TRIANGLE, PS_TRIANGLE),
+				new TouchPadView.Spec("□", C_SQUARE, PS_SQUARE),
+				new TouchPadView.Spec("○", C_CIRCLE, PS_CIRCLE),
+				new TouchPadView.Spec("✕", C_CROSS, PS_CROSS),
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("L1", C_SHORT, KeyEvent.KEYCODE_BUTTON_L1),
+					new TouchPadView.Spec("L2", C_SHORT, KeyEvent.KEYCODE_BUTTON_L2),
+				},
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("R1", C_SHORT, KeyEvent.KEYCODE_BUTTON_R1),
+					new TouchPadView.Spec("R2", C_SHORT, KeyEvent.KEYCODE_BUTTON_R2),
+				},
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("SELECT", 0xFFE8E8EE, KEY_COIN),
+					new TouchPadView.Spec("START", 0xFFE8E8EE, KEY_START),
+				});
+			pad.setStick("stick".equals(prefs.getString("move", "dpad")));
+			pad.setSizePercent(prefs.getInt("size", 100));
+			pad.setOpacity(prefs.getFloat("opacity", 0.85f));
+			pad.setVisibility(prefs.getBoolean("hide_pad", false) ? View.GONE : View.VISIBLE);
+			return;
+		}
 		pad.setButtons(
 			new TouchPadView.Spec[] { new TouchPadView.Spec("A", C_A, KEY_A), new TouchPadView.Spec("C", C_C, KEY_C) },
 			new TouchPadView.Spec[] { new TouchPadView.Spec("B", C_B, KEY_B), new TouchPadView.Spec("D", C_D, KEY_D) },
@@ -222,7 +267,12 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		GameRun.step(this, "error " + code + " del emulador");
 		String msg;
 		if (code == GLRetroView.ERROR_LOAD_LIBRARY) {
-			msg = "No se pudo cargar el emulador FBNeo en este teléfono.";
+			msg = "No se pudo cargar el emulador " + (psx ? "de PS1 (PCSX ReARMed)" : "FBNeo") + " en este teléfono.";
+		} else if (code == GLRetroView.ERROR_LOAD_GAME && psx) {
+			msg = "El emulador de PS1 no pudo abrir «" + rom.getName() + "».\n\n"
+				+ "• Si es un .cue, tienen que estar todos los .bin que nombra (elígelos juntos al añadirlo).\n"
+				+ "• Formatos que abre: .cue + .bin, .chd, .pbp, .iso, .img.\n"
+				+ "• El archivo puede estar incompleto o dañado: vuelve a añadirlo.";
 		} else if (code == GLRetroView.ERROR_LOAD_GAME) {
 			String found = "";
 			try {
@@ -313,6 +363,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		final boolean stick = "stick".equals(prefs.getString("move", "dpad"));
 		final int size = prefs.getInt("size", 100);
 		final boolean aes = "aes".equals(prefs.getString("neogeo_mode", "mvs"));
+		final boolean hires = prefs.getBoolean("hires", false);
 		final boolean hidden = prefs.getBoolean("hide_pad", false);
 		String shaderId = prefs.getString("shader", "sharp");
 		String shaderName = SHADER_NAMES[0];
@@ -329,7 +380,8 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			"🔘  Tamaño de los botones: " + (size < 95 ? "pequeño" : size > 110 ? "grande" : "normal"),
 			"👁  Controles en pantalla: " + (hidden ? "ocultos" : "visibles"),
 			"🖼  Imagen: " + shaderName,
-			"🎮  Neo Geo: " + (aes ? "AES (consola, sin monedas)" : "MVS (arcade, con monedas)"),
+			psx ? "✨  Resolución: " + (hires ? "doble (más nítida, pide más al teléfono)" : "normal de PS1")
+				: "🎮  Neo Geo: " + (aes ? "AES (consola, sin monedas)" : "MVS (arcade, con monedas)"),
 			"🔄  Reiniciar el juego",
 			"✕  Salir al catálogo",
 		};
@@ -366,8 +418,14 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 						pickShader();
 						return;
 					case 7:
-						prefs.edit().putString("neogeo_mode", aes ? "mvs" : "aes").apply();
-						Toast.makeText(this, "Se aplica la próxima vez que abras el juego", Toast.LENGTH_LONG).show();
+						if (psx) {
+							prefs.edit().putBoolean("hires", !hires).apply();
+							retro.updateVariables(new Variable("pcsx_rearmed_neon_enhancement_enable", !hires ? "enabled" : "disabled", null));
+							Toast.makeText(this, !hires ? "Resolución doble: si va lento, vuelve a la normal" : "Resolución normal", Toast.LENGTH_SHORT).show();
+						} else {
+							prefs.edit().putString("neogeo_mode", aes ? "mvs" : "aes").apply();
+							Toast.makeText(this, "Se aplica la próxima vez que abras el juego", Toast.LENGTH_LONG).show();
+						}
 						break;
 					case 8:
 						retro.reset(false);

@@ -36,13 +36,13 @@ final class GameCatalog {
 	static final int MAX_GAMES = 40;
 
 	/** Badge of each kind of game in the catalog. */
-	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4, BADGE_ARCADE = 5, BADGE_MUGEN = 6;
+	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4, BADGE_ARCADE = 5, BADGE_MUGEN = 6, BADGE_PSX = 7;
 
-	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER", "ARCADE · NEO GEO", "MUGEN" };
-	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E, 0xFF19B98C, 0xFFA45CFF };
+	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER", "ARCADE · NEO GEO", "MUGEN", "PLAYSTATION 1" };
+	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E, 0xFF19B98C, 0xFFA45CFF, 0xFF8C9BFF };
 
 	/** Order of the filters in the catalog ("other" last). */
-	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_ARCADE, BADGE_MUGEN, BADGE_OTHER };
+	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_ARCADE, BADGE_PSX, BADGE_MUGEN, BADGE_OTHER };
 
 	/** The system of a catalog entry: "" for PSP, ArcadeLibrary.SYSTEM or MugenInstaller.SYSTEM. */
 	static String system(org.json.JSONObject entry) {
@@ -60,6 +60,9 @@ final class GameCatalog {
 		}
 		if (MugenInstaller.SYSTEM.equals(sys)) {
 			return BADGE_MUGEN;
+		}
+		if (PsxLibrary.SYSTEM.equals(sys)) {
+			return BADGE_PSX;
 		}
 		return badge(entry.optString("id"), entry.optString("title"));
 	}
@@ -192,7 +195,7 @@ final class GameCatalog {
 
 	/** A cover in the icon's 144:80 shape for games without an icon (or until it loads). */
 	static Bitmap cover(int badge, String title, int widthPx) {
-		boolean named = badge == BADGE_OTHER || badge == BADGE_ARCADE;
+		boolean named = badge == BADGE_OTHER || badge == BADGE_ARCADE;   // (PS1 covers all say PS1)
 		String key = badge + "|" + widthPx + "|" + (named ? initials(title) : "");
 		Bitmap hit = covers.get(key);
 		if (hit == null) {
@@ -227,6 +230,7 @@ final class GameCatalog {
 			case BADGE_KOF: big = "KOF"; break;
 			case BADGE_SF: big = "SF"; break;
 			case BADGE_MUGEN: big = "MUGEN"; break;
+			case BADGE_PSX: big = "PS1"; break;
 			case BADGE_ARCADE: big = arcadeBig(title); break;
 			default: big = initials(title); break;
 		}

@@ -69,6 +69,9 @@ final class TouchPadView extends View {
 
 	private final List<Btn> buttons = new ArrayList<>();
 	private Spec[] top = new Spec[0], bottom = new Spec[0], shortcuts = new Spec[0], system = new Spec[0];
+	// PlayStation layout: four face buttons in a diamond, shoulder buttons in the top corners.
+	private Spec[] diamond;            // top, left, right, bottom; null for the rows layout
+	private Spec[] leftShoulders = new Spec[0], rightShoulders = new Spec[0];
 	private final SparseArray<Integer> pointers = new SparseArray<>();
 	private final Map<Integer, Integer> held = new HashMap<>();
 	private Listener listener;
@@ -105,9 +108,23 @@ final class TouchPadView extends View {
 	/** Big buttons in two rows (the top row sits between the ones below), shortcuts, coin / start. */
 	void setButtons(Spec[] topRow, Spec[] bottomRow, Spec[] shortcutRow, Spec[] systemRow) {
 		releaseAll();
+		diamond = null;
+		leftShoulders = rightShoulders = new Spec[0];
 		top = topRow;
 		bottom = bottomRow;
 		shortcuts = shortcutRow;
+		system = systemRow;
+		layoutButtons();
+		invalidate();
+	}
+
+	/** PlayStation style: face buttons in a diamond, L / R buttons in the top corners. */
+	void setDiamond(Spec topButton, Spec leftButton, Spec rightButton, Spec bottomButton, Spec[] left, Spec[] right, Spec[] systemRow) {
+		releaseAll();
+		diamond = new Spec[] { topButton, leftButton, rightButton, bottomButton };
+		leftShoulders = left;
+		rightShoulders = right;
+		top = bottom = shortcuts = new Spec[0];
 		system = systemRow;
 		layoutButtons();
 		invalidate();
@@ -180,6 +197,25 @@ final class TouchPadView extends View {
 		}
 		for (int i = 0; i < shortcuts.length; i++) {
 			add(shortcuts[i], KIND_SHORTCUT, w - m - small / 2f - (shortcuts.length - 1 - i) * 1.18f * small, yShort, small / 2f);
+		}
+		if (diamond != null) {
+			// Face buttons a little smaller than the arcade ones, so the diamond fits the height.
+			final float fd = 0.9f * d;
+			final float r = 0.93f * fd;
+			final float cx = w - m - fd / 2f - r - 0.01f * w, cy = h - m - fd / 2f - r;
+			add(diamond[0], KIND_MAIN, cx, cy - r, fd / 2f);
+			add(diamond[1], KIND_MAIN, cx - r, cy, fd / 2f);
+			add(diamond[2], KIND_MAIN, cx + r, cy, fd / 2f);
+			add(diamond[3], KIND_MAIN, cx, cy + r, fd / 2f);
+			// Shoulder buttons along the top edge, 1 nearest the corners.
+			final float sh = 0.7f * d;
+			final float ys = m + sh / 2f + 0.03f * h;
+			for (int i = 0; i < leftShoulders.length; i++) {
+				add(leftShoulders[i], KIND_SHORTCUT, m + sh / 2f + 0.02f * w + i * 1.2f * sh, ys, sh / 2f);
+			}
+			for (int i = 0; i < rightShoulders.length; i++) {
+				add(rightShoulders[i], KIND_SHORTCUT, w - m - sh / 2f - 0.02f * w - i * 1.2f * sh, ys, sh / 2f);
+			}
 		}
 		// Coin / start at the bottom in the middle, pause at the top in the middle.
 		final float sys = 0.42f * d;

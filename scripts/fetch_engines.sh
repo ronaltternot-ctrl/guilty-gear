@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Downloads the engines of the other systems into the PPSSPP tree prepared by prepare.sh:
-#   - FBNeo libretro core (arcade / Neo Geo games), Lemuroid's Android build, pinned commit.
+#   - FBNeo and PCSX ReARMed libretro cores (arcade / Neo Geo and PlayStation 1 games), Lemuroid's
+#     Android builds, pinned commit.
 #   - Ikemen GO v1.0.0 for Android (MUGEN games): libmain.so with SDL2, FFmpeg and libxmp,
 #     and the engine files a MUGEN game doesn't have (external/, data/, font/).
 # Native libraries go to android/extlibs/<abi> (patches/0008 adds it to jniLibs), the engine
@@ -17,10 +18,13 @@ ABI="arm64-v8a"
 LIBS="$TARGET/android/extlibs/$ABI"
 ASSETS="$TARGET/assets/ikemen"
 
-FBNEO_REPO="Swordfish90/LemuroidCores"
-FBNEO_COMMIT="fee2e824525daa22bcf318f96127fe43fa8a15ad"
-FBNEO_PATH="lemuroid_core_fbneo/src/main/jniLibs/$ABI/libfbneo_libretro_android.so"
-FBNEO_SHA256="88fd9f4aa9d8f235b58e64e78947ede0965c1e7ff85caf03dbcfcfe914b2e583"
+CORES_REPO="Swordfish90/LemuroidCores"
+CORES_COMMIT="fee2e824525daa22bcf318f96127fe43fa8a15ad"
+# name  module  sha256
+CORES="
+fbneo lemuroid_core_fbneo 88fd9f4aa9d8f235b58e64e78947ede0965c1e7ff85caf03dbcfcfe914b2e583
+pcsx_rearmed lemuroid_core_pcsx_rearmed 1c32c21dcc488889db7556bd0bd11c72219228f8d35d36bc30c640472af21fd3
+"
 
 IKEMEN_VERSION="v1.0.0"
 IKEMEN_URL="https://github.com/ikemen-engine/Ikemen-GO/releases/download/$IKEMEN_VERSION/Ikemen_GO-$IKEMEN_VERSION-android.zip"
@@ -32,24 +36,29 @@ check() {   # file sha256
 	echo "$2  $1" | sha256sum -c --quiet -
 }
 
-# --- FBNeo -------------------------------------------------------------------------------------
-FBNEO="$CACHE/libfbneo_libretro_android-$FBNEO_COMMIT.so"
-if [ ! -f "$FBNEO" ] || ! check "$FBNEO" "$FBNEO_SHA256"; then
-	echo "==> Downloading the FBNeo core"
-	rm -f "$FBNEO"
-	if ! curl -fsSL --retry 3 -o "$FBNEO.part" "https://raw.githubusercontent.com/$FBNEO_REPO/$FBNEO_COMMIT/$FBNEO_PATH"; then
-		# raw.githubusercontent.com unreachable: fetch the blob with git.
-		TMPGIT="$(mktemp -d)"
-		git -C "$TMPGIT" init -q
-		git -C "$TMPGIT" fetch -q --depth 1 --filter=blob:none "https://github.com/$FBNEO_REPO.git" "$FBNEO_COMMIT"
-		git -C "$TMPGIT" show "FETCH_HEAD:$FBNEO_PATH" > "$FBNEO.part"
-		rm -rf "$TMPGIT"
+# --- Libretro cores --------------------------------------------------------------------------
+while read -r NAME MODULE SHA; do
+	[ -z "$NAME" ] && continue
+	SO="lib${NAME}_libretro_android.so"
+	CACHED="$CACHE/${NAME}-$CORES_COMMIT.so"
+	if [ ! -f "$CACHED" ] || ! check "$CACHED" "$SHA"; then
+		echo "==> Downloading the $NAME core"
+		rm -f "$CACHED"
+		CORE_PATH="$MODULE/src/main/jniLibs/$ABI/$SO"
+		if ! curl -fsSL --retry 3 -o "$CACHED.part" "https://raw.githubusercontent.com/$CORES_REPO/$CORES_COMMIT/$CORE_PATH"; then
+			# raw.githubusercontent.com unreachable: fetch the blob with git.
+			TMPGIT="$(mktemp -d)"
+			git -C "$TMPGIT" init -q
+			git -C "$TMPGIT" fetch -q --depth 1 --filter=blob:none "https://github.com/$CORES_REPO.git" "$CORES_COMMIT"
+			git -C "$TMPGIT" show "FETCH_HEAD:$CORE_PATH" > "$CACHED.part"
+			rm -rf "$TMPGIT"
+		fi
+		check "$CACHED.part" "$SHA"
+		mv "$CACHED.part" "$CACHED"
 	fi
-	check "$FBNEO.part" "$FBNEO_SHA256"
-	mv "$FBNEO.part" "$FBNEO"
-fi
-cp "$FBNEO" "$LIBS/libfbneo_libretro_android.so"
-echo "    FBNeo: $(du -h "$LIBS/libfbneo_libretro_android.so" | cut -f1)"
+	cp "$CACHED" "$LIBS/$SO"
+	echo "    $NAME: $(du -h "$LIBS/$SO" | cut -f1)"
+done <<< "$CORES"
 
 # --- Ikemen GO ---------------------------------------------------------------------------------
 IKZIP="$CACHE/Ikemen_GO-$IKEMEN_VERSION-android.zip"

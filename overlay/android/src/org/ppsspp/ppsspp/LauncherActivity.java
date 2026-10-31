@@ -73,6 +73,7 @@ public class LauncherActivity extends Activity {
 	private static final int REQUEST_ADD_ARCADE = 4203;
 	private static final int REQUEST_ADD_MUGEN_FOLDER = 4204;
 	private static final int REQUEST_ADD_MUGEN_ZIP = 4205;
+	private static final int REQUEST_ADD_PSX = 4206;
 
 	private static final String PREFS = "launcher";
 	private static final String K_URI = "game_uri";
@@ -459,6 +460,12 @@ public class LauncherActivity extends Activity {
 		if (requestCode == REQUEST_ADD_ARCADE) {
 			if (resultCode == RESULT_OK && data != null) {
 				onArcadeAdded(data);
+			}
+			return;
+		}
+		if (requestCode == REQUEST_ADD_PSX) {
+			if (resultCode == RESULT_OK && data != null) {
+				onPsxAdded(data);
 			}
 			return;
 		}
@@ -1575,11 +1582,13 @@ public class LauncherActivity extends Activity {
 			"Botones arcade de 6 (LP MP HP / LK MK HK), gestos (cadena LP → MP → HP, V-ISM y Alpha Counter), HUD propio (vida, súper, guardia y tiempo), efectos y FSR. Sin perfiles por personaje por ahora." },
 		{ "The King of Fighters 2002 (Arcade / Neo Geo)", "kof2002.zip + neogeo.zip · también Magic Plus, Plus y otros juegos de FBNeo",
 			"Emulador FBNeo con controles táctiles A B C D y atajos AB, CD, BC y ABC, flechas o joystick, estados guardados, filtros de imagen y modo MVS (arcade) o AES (consola). Las versiones hack necesitan también kof2002.zip." },
+		{ "PlayStation 1", ".cue + .bin · .chd · .pbp · .iso · .zip · .7z · BIOS opcional (scph1001.bin…)",
+			"Emulador PCSX ReARMed con controles táctiles de PlayStation (△ ○ ✕ □, L1 L2 R1 R2, Select y Start), flechas o joystick, tarjeta de memoria, estados guardados, filtros de imagen y resolución doble. KOF '95–'99, Tekken 3, Street Fighter Alpha 3 y más." },
 		{ "Juegos MUGEN (KOF 2012 fan made y otros)", "Carpeta o .zip del juego · motor Ikemen GO 1.0",
 			"Ikemen GO abre los juegos hechos para MUGEN 1.0 / 1.1 con su pantalla de título, selección y peleas. Controles táctiles en diseño KOF (A B C D) o de 6 botones. Necesita Android 13 o más nuevo y una GPU con OpenGL ES 3.2." },
 	};
 	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF, GameCatalog.BADGE_SF,
-		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_MUGEN };
+		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_PSX, GameCatalog.BADGE_MUGEN };
 
 	/** ImageView with the shape of a PSP game icon (144 x 80). */
 	private static final class IconView extends ImageView {
@@ -1702,15 +1711,21 @@ public class LauncherActivity extends Activity {
 		others.setOrientation(LinearLayout.HORIZONTAL);
 		TextView addArcade = outlineButton("+  Arcade / Neo Geo");
 		addArcade.setOnClickListener(v -> pickArcade());
-		TextView addMugen = outlineButton("+  Juego MUGEN");
-		addMugen.setOnClickListener(v -> pickMugen());
+		TextView addPsx = outlineButton("+  PlayStation 1");
+		addPsx.setOnClickListener(v -> pickPsx());
 		others.addView(addArcade, weighted(0, dp(6)));
-		others.addView(addMugen, weighted(dp(6), 0));
+		others.addView(addPsx, weighted(dp(6), 0));
 		LinearLayout.LayoutParams othersLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		othersLp.topMargin = dp(12);
 		col.addView(others, othersLp);
+		TextView addMugen = outlineButton("+  Juego MUGEN");
+		addMugen.setOnClickListener(v -> pickMugen());
+		LinearLayout.LayoutParams mugenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		mugenLp.topMargin = dp(8);
+		col.addView(addMugen, mugenLp);
 		TextView othersHint = text("Arcade: los ZIP del juego (kof2002.zip…) y la BIOS neogeo.zip, con el emulador FBNeo. "
-			+ "MUGEN: la carpeta o el .zip de un juego MUGEN (por ejemplo un KOF 2012 fan made), con el motor Ikemen GO. "
+			+ "PlayStation 1: el .cue con sus .bin, o un .chd, .pbp, .iso, .zip o .7z, con el emulador PCSX ReARMed. "
+			+ "MUGEN: la carpeta, el .zip o el .7z de un juego MUGEN (por ejemplo un KOF 2012 fan made), con el motor Ikemen GO. "
 			+ "Se copian dentro de la app.", 12, 0xFF6C6C78, false);
 		othersHint.setPadding(0, dp(6), 0, 0);
 		col.addView(othersHint);
@@ -1740,7 +1755,7 @@ public class LauncherActivity extends Activity {
 			for (int b : GameCatalog.BADGE_ORDER) {
 				if (counts[b] > 0) {
 					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF"
-						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : "Otros") + " · " + counts[b]);
+						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : "Otros") + " · " + counts[b]);
 				}
 			}
 			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1906,6 +1921,7 @@ public class LauncherActivity extends Activity {
 
 	private View otherSystemTile(final org.json.JSONObject e) {
 		final boolean arcade = ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e));
+		final boolean psx = PsxLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final String title = e.optString("title", e.optString("name"));
 		int badge = GameCatalog.badge(e);
 		LinearLayout tile = new LinearLayout(this);
@@ -1946,7 +1962,7 @@ public class LauncherActivity extends Activity {
 		tile.addView(kind);
 		File file = otherFile(e);
 		boolean there = file != null && file.exists();
-		TextView detail = text(there ? (arcade ? e.optString("name") + " · FBNeo" : "Ikemen GO · " + e.optString("name"))
+		TextView detail = text(there ? (arcade ? e.optString("name") + " · FBNeo" : psx ? e.optString("format") + " · PCSX ReARMed" : "Ikemen GO · " + e.optString("name"))
 			: "⚠ Ya no está en la app: vuelve a añadirlo", 11, there ? C_MUTED : C_WARN, false);
 		detail.setMaxLines(1);
 		detail.setEllipsize(TextUtils.TruncateAt.END);
@@ -2023,6 +2039,8 @@ public class LauncherActivity extends Activity {
 				return;
 			}
 			startArcade(f, title);
+		} else if (PsxLibrary.SYSTEM.equals(GameCatalog.system(e))) {
+			startRetro(f, title, PsxLibrary.SYSTEM);
 		} else {
 			startMugen(f, title);
 		}
@@ -2044,9 +2062,15 @@ public class LauncherActivity extends Activity {
 	}
 
 	private void startArcade(File rom, String title) {
+		startRetro(rom, title, ArcadeLibrary.SYSTEM);
+	}
+
+	/** A game on a libretro core: arcade (FBNeo) or PlayStation 1 (PCSX ReARMed). */
+	private void startRetro(File rom, String title, String system) {
 		Intent i = new Intent(this, ArcadeActivity.class);
 		i.putExtra(ArcadeActivity.EXTRA_ROM, rom.getAbsolutePath());
 		i.putExtra(ArcadeActivity.EXTRA_TITLE, title);
+		i.putExtra(ArcadeActivity.EXTRA_SYSTEM, system);
 		try {
 			startActivity(i);
 		} catch (RuntimeException ex) {
@@ -2101,7 +2125,7 @@ public class LauncherActivity extends Activity {
 		// The whole folder the import created (the game can be a folder or two inside it).
 		File top = f;
 		if (!arcade && f != null) {
-			File games = MugenInstaller.gamesDir(this);
+			File games = PsxLibrary.SYSTEM.equals(GameCatalog.system(e)) ? PsxLibrary.gamesDir(this) : MugenInstaller.gamesDir(this);
 			File cur = f;
 			while (cur != null && cur.getParentFile() != null && !games.equals(cur.getParentFile())) {
 				cur = cur.getParentFile();
@@ -2114,7 +2138,7 @@ public class LauncherActivity extends Activity {
 		new AlertDialog.Builder(this)
 			.setTitle("¿Quitar del catálogo?")
 			.setMessage(title + "\n\nSe borra la copia que guardó la app (" + String.format(Locale.ROOT, "%.0f MB", bytes / 1048576.0)
-				+ ")" + (arcade ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
+				+ ")" + (arcade || PsxLibrary.SYSTEM.equals(GameCatalog.system(e)) ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
 			.setPositiveButton("Quitar y borrar", (d, w) -> {
 				org.json.JSONArray lib = loadLibrary();
 				org.json.JSONArray out = new org.json.JSONArray();
@@ -2330,6 +2354,85 @@ public class LauncherActivity extends Activity {
 			.put("title", ArcadeCheck.title(app, set))
 			.put("id", set)
 			.put("format", zip ? "ZIP" : "7Z"));
+	}
+
+	private void pickPsx() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+		try {
+			startActivityForResult(intent, REQUEST_ADD_PSX);
+			Toast.makeText(this, "Elige el juego. Si es .cue, elige también sus .bin (mantén pulsado para elegir varios).", Toast.LENGTH_LONG).show();
+		} catch (ActivityNotFoundException ex) {
+			showMessage("Sin selector de archivos", "Tu teléfono no tiene un selector de archivos disponible.");
+		}
+	}
+
+	/** «+ PlayStation 1»: copies each game into its own folder (and BIOS files to the emulator's). */
+	private void onPsxAdded(Intent data) {
+		final List<Uri> uris = new ArrayList<>();
+		ClipData clip = data.getClipData();
+		if (clip != null) {
+			for (int i = 0; i < clip.getItemCount(); i++) {
+				Uri u = clip.getItemAt(i).getUri();
+				if (u != null) {
+					uris.add(u);
+				}
+			}
+		} else if (data.getData() != null) {
+			uris.add(data.getData());
+		}
+		if (uris.isEmpty()) {
+			return;
+		}
+		final android.app.ProgressDialog pd = progressDialog("Copiando juegos de PlayStation");
+		final android.content.Context app = getApplicationContext();
+		new Thread(() -> {
+			PsxLibrary.Result r = PsxLibrary.importFiles(app, uris, (what, done, total) -> handler.post(() -> pd.setMessage(
+				total > 0 ? String.format(Locale.ROOT, "%s\n%d de %d MB", what, done >> 20, total >> 20)
+					: String.format(Locale.ROOT, "%s\n%d MB", what, done >> 20))));
+			final List<org.json.JSONObject> added = new ArrayList<>();
+			for (File main : r.games) {
+				try {
+					String name = main.getName();
+					int dot = name.lastIndexOf('.');
+					added.add(new org.json.JSONObject()
+						.put("system", PsxLibrary.SYSTEM)
+						.put("uri", Uri.fromFile(main).toString())
+						.put("name", name)
+						.put("title", PsxLibrary.title(name))
+						.put("id", "PS1")
+						.put("format", dot > 0 ? name.substring(dot + 1).toUpperCase(Locale.ROOT) : "PS1"));
+				} catch (org.json.JSONException ex) {
+					Log.w(TAG, "PS1 entry", ex);
+				}
+			}
+			handler.post(() -> {
+				doneProgress(pd);
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				for (int i = added.size() - 1; i >= 0; i--) {
+					putInLibrary(added.get(i), true);
+				}
+				refreshLibrary();
+				StringBuilder msg = new StringBuilder();
+				if (!added.isEmpty()) {
+					msg.append(added.size() == 1 ? "Se añadió 1 juego de PlayStation." : "Se añadieron " + added.size() + " juegos de PlayStation.");
+				}
+				if (!r.bios.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n" : "").append("BIOS guardada: ").append(TextUtils.join(", ", r.bios))
+						.append(". El emulador la usa en vez de la suya.");
+				}
+				if (!r.problems.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n\n" : "").append("No se añadieron:\n").append(TextUtils.join("\n", r.problems));
+				}
+				if (msg.length() > 0) {
+					showMessage("PlayStation 1", msg.toString());
+				}
+			});
+		}, "PsxAdd").start();
 	}
 
 	private void pickMugen() {
@@ -3142,6 +3245,9 @@ public class LauncherActivity extends Activity {
 		+ "■ FBNeo (Arcade / Neo Geo)\n"
 		+ "FinalBurn Neo, del equipo de FBNeo (github.com/finalburnneo/FBNeo), en su versión libretro compilada por Lemuroid "
 		+ "(github.com/Swordfish90/LemuroidCores). Licencia de FBNeo: uso no comercial. La app es gratis.\n\n"
+		+ "■ PCSX ReARMed (PlayStation 1)\n"
+		+ "Emulador de PlayStation de los autores de PCSX y PCSX ReARMed (github.com/libretro/pcsx_rearmed), versión libretro "
+		+ "compilada por Lemuroid. Licencia GPL 2.0. Trae su propia BIOS (HLE); si añades la tuya, la usa.\n\n"
 		+ "■ LibretroDroid\n"
 		+ "Frontend libretro para Android de Filippo Scognamiglio (github.com/Swordfish90/LibretroDroid). Licencia GPL 3.0.\n\n"
 		+ "■ Ikemen GO (MUGEN)\n"
@@ -3151,7 +3257,7 @@ public class LauncherActivity extends Activity {
 		+ "La lista completa está en assets/ikemen/LICENSES.txt dentro de la app.\n\n"
 		+ "■ Juegos\n"
 		+ "Guilty Gear es una marca de Arc System Works; BlazBlue, de Arc System Works; The King of Fighters, Metal Slug y Neo Geo, de SNK; "
-		+ "Street Fighter, de Capcom. Este proyecto no está afiliado ni respaldado por ninguna de ellas y no incluye ningún archivo "
+		+ "Street Fighter, de Capcom; PlayStation, de Sony Interactive Entertainment. Este proyecto no está afiliado ni respaldado por ninguna de ellas y no incluye ningún archivo "
 		+ "de sus juegos ni BIOS: cada jugador usa sus propias copias. Los juegos MUGEN son de sus autores.";
 
 	/** A special move button's input: chosen in the launcher, or the character's default. */
