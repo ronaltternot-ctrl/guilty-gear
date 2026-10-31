@@ -46,7 +46,9 @@ $(grep -iE "error|fatal|cmake|failed|not found" "$2" | tail -n 25)"
 }
 
 if [ ! -f "$CACHED" ]; then
-	NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+	# The runner's default NDK first (the newest one's libc++ no longer pulls in <functional>, which
+	# LibretroDroid's sources rely on; the -include flags below cover that too).
+	NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
 	if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
 		NDK="$(ls -d "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"/ndk/* 2>/dev/null | sort -V | tail -n 1 || true)"
 	fi
@@ -84,6 +86,7 @@ if [ ! -f "$CACHED" ]; then
 	"$CMAKE" -S "$WORK/src/libretrodroid/src/main/cpp" -B "$WORK/build" -G "$GENERATOR" \
 		-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
 		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-DCMAKE_CXX_FLAGS="-include functional -include algorithm -include memory -include string" \
 		-DANDROID_ABI="$ABI" \
 		-DANDROID_PLATFORM=android-21 \
 		-DANDROID_STL=c++_static \

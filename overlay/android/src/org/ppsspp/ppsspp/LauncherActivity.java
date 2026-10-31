@@ -85,6 +85,8 @@ public class LauncherActivity extends Activity {
 	private static final String K_INSPECTED = "game_inspected";
 	private static final String K_RES = "resolution";
 	private static final String K_TOUCH = "touch_controls";
+	/** Each section of the home screen open or folded (key + its title); only «JUEGO» starts open. */
+	private static final String K_SECTION_OPEN = "section_open_";
 	private static final String K_BACKEND = "backend";
 	private static final String K_FPS = "show_fps";
 	private static final String K_STYLE = "button_style";
@@ -296,16 +298,20 @@ public class LauncherActivity extends Activity {
 	private static final int PSP_H = 272;
 	private static final int MAX_RES = 8;
 
-	// Palette
-	private static final int C_BG = 0xFF0D0D11;
-	private static final int C_CARD = 0xFF16161C;
-	private static final int C_STROKE = 0xFF272730;
-	private static final int C_ACCENT = 0xFFD7263D;
-	private static final int C_TEXT = 0xFFF2F2F5;
-	private static final int C_MUTED = 0xFF9A9AA8;
-	private static final int C_OK = 0xFF3FB950;
-	private static final int C_WARN = 0xFFE3B341;
-	private static final int C_CHIP_STROKE = 0xFF3A3A46;
+	// Palette: minimal and retro, after the PlayStation 2's menus (deep blue, black, soft blue light).
+	private static final int C_BG = 0xFF02040B;
+	private static final int C_CARD = 0x590A1430;
+	private static final int C_STROKE = 0x332F4E8F;
+	private static final int C_ACCENT = 0xFF6F9BFF;
+	private static final int C_TEXT = 0xFFE9EEF9;
+	private static final int C_MUTED = 0xFF8792AE;
+	private static final int C_OK = 0xFF5BD69A;
+	private static final int C_WARN = 0xFFE8C15A;
+	private static final int C_CHIP_STROKE = 0x553D5A99;
+	/** The soft blue glow behind titles and selected items. */
+	private static final int C_GLOW = 0x996F9BFF;
+	/** Section titles: light, spaced, a little blue. */
+	private static final int C_SECTION = 0xFFB8C6E6;
 
 	private final Handler handler = new Handler(Looper.getMainLooper());
 	private SharedPreferences prefs;
@@ -1653,7 +1659,7 @@ public class LauncherActivity extends Activity {
 		}
 		Dialog d = new Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar);
 		ScrollView scroll = new ScrollView(this);
-		scroll.setBackgroundColor(C_BG);
+		scroll.setBackground(new Ps2Background(getResources().getDisplayMetrics().density));
 		scroll.setFillViewport(true);
 		if (Build.VERSION.SDK_INT >= 35) {
 			scroll.setOnApplyWindowInsetsListener((v, insets) -> {
@@ -1886,7 +1892,7 @@ public class LauncherActivity extends Activity {
 		FrameLayout pic = new FrameLayout(this);
 		final IconView img = new IconView(this);
 		GradientDrawable round = new GradientDrawable();
-		round.setColor(0xFF101015);
+		round.setColor(0xFF070B18);
 		round.setCornerRadius(dp(10));
 		img.setBackground(round);
 		img.setClipToOutline(true);
@@ -1971,7 +1977,7 @@ public class LauncherActivity extends Activity {
 
 		IconView img = new IconView(this);
 		GradientDrawable round = new GradientDrawable();
-		round.setColor(0xFF101015);
+		round.setColor(0xFF070B18);
 		round.setCornerRadius(dp(10));
 		img.setBackground(round);
 		img.setClipToOutline(true);
@@ -2610,7 +2616,7 @@ public class LauncherActivity extends Activity {
 		musicVolume.setMax(100);
 		musicVolume.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
 		musicVolume.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
-		musicVolume.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF4A4A55));
+		musicVolume.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2A3350));
 		musicVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 			@Override
 			public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -4374,7 +4380,7 @@ public class LauncherActivity extends Activity {
 	private View buildUi() {
 		final ScrollView scroll = new ScrollView(this);
 		mainScroll = scroll;
-		scroll.setBackgroundColor(C_BG);
+		scroll.setBackground(new Ps2Background(getResources().getDisplayMetrics().density));
 		scroll.setFillViewport(true);
 		if (Build.VERSION.SDK_INT >= 35) {
 			// Android 15+ draws apps edge-to-edge; keep content clear of the system bars.
@@ -4395,15 +4401,26 @@ public class LauncherActivity extends Activity {
 		center.addView(col, new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
 		// Header
-		headerKicker = text("GUILTY GEAR XX", 13, C_ACCENT, true);
-		headerKicker.setLetterSpacing(0.3f);
+		headerKicker = text("GUILTY GEAR XX", 12, C_ACCENT, false);
+		headerKicker.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		headerKicker.setLetterSpacing(0.45f);
 		col.addView(headerKicker);
-		headerTitle = text("ΛCORE PLUS", 38, C_TEXT, true);
-		headerTitle.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
-		headerTitle.setLetterSpacing(0.02f);
+		headerTitle = text("ΛCORE PLUS", 30, C_TEXT, false);
+		headerTitle.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+		headerTitle.setLetterSpacing(0.06f);
+		headerTitle.setShadowLayer(dp(10), 0, 0, C_GLOW);
+		headerTitle.setPadding(0, dp(2), 0, dp(2));
 		col.addView(headerTitle);
-		headerSubtitle = text("Edición PSP · listo para jugar en Android", 14, C_MUTED, false);
+		headerSubtitle = text("Edición PSP · listo para jugar en Android", 13, C_MUTED, false);
+		headerSubtitle.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		headerSubtitle.setLetterSpacing(0.04f);
 		col.addView(headerSubtitle);
+		// A thin line of light under the title, like the PS2's menus.
+		View headerLine = new View(this);
+		headerLine.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] { C_ACCENT, 0x336F9BFF, 0x00000000 }));
+		LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
+		lineLp.topMargin = dp(14);
+		col.addView(headerLine, lineLp);
 
 		// Running game banner
 		runningCard = card(C_WARN);
@@ -4429,7 +4446,7 @@ public class LauncherActivity extends Activity {
 		gameRow.setOrientation(LinearLayout.HORIZONTAL);
 		gameIcon = new IconView(this);
 		GradientDrawable iconBg = new GradientDrawable();
-		iconBg.setColor(0xFF101015);
+		iconBg.setColor(0xFF070B18);
 		iconBg.setCornerRadius(dp(10));
 		gameIcon.setBackground(iconBg);
 		gameIcon.setClipToOutline(true);
@@ -4449,11 +4466,13 @@ public class LauncherActivity extends Activity {
 		gameTexts.addView(gameDetail);
 		gameRow.addView(gameTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 		game.addView(gameRow);
-		catalogButton = text("CATÁLOGO", 15, C_TEXT, true);
+		catalogButton = text("CATÁLOGO", 15, C_TEXT, false);
+		catalogButton.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
 		catalogButton.setGravity(Gravity.CENTER);
-		catalogButton.setLetterSpacing(0.08f);
+		catalogButton.setLetterSpacing(0.3f);
 		catalogButton.setPadding(dp(16), dp(13), dp(16), dp(13));
-		catalogButton.setBackground(ripple(0x22D7263D, C_ACCENT, 14));
+		catalogButton.setShadowLayer(dp(6), 0, 0, C_GLOW);
+		catalogButton.setBackground(ripple(0x1F6F9BFF, C_ACCENT, 14));
 		makeClickable(catalogButton);
 		catalogButton.setOnClickListener(v -> showCatalog());
 		LinearLayout.LayoutParams catLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -5123,7 +5142,7 @@ public class LauncherActivity extends Activity {
 		if (Build.VERSION.SDK_INT >= 21) {
 			fsrSeek.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
 			fsrSeek.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
-			fsrSeek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF4A4A55));
+			fsrSeek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2A3350));
 		}
 		fsrSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 			@Override
@@ -5194,7 +5213,9 @@ public class LauncherActivity extends Activity {
 
 		// Play
 		playButton = filledButton("JUGAR", 20);
-		playButton.setLetterSpacing(0.15f);
+		playButton.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		playButton.setLetterSpacing(0.5f);
+		playButton.setShadowLayer(dp(8), 0, 0, 0xFFBFD4FF);
 		playButton.setPadding(dp(16), dp(18), dp(16), dp(18));
 		playButton.setOnClickListener(v -> onPlayPressed());
 		LinearLayout.LayoutParams playParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -5226,14 +5247,51 @@ public class LauncherActivity extends Activity {
 			insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
 	}
 
+	/**
+	 * One section of the home screen: a line with its title, like an option of the PS2's menus,
+	 * that opens and folds its content (the screen stays short). Returns the content.
+	 */
 	private LinearLayout section(LinearLayout parent, String title) {
 		LinearLayout card = card(C_STROKE);
-		TextView label = text(title, 12, C_MUTED, true);
-		label.setLetterSpacing(0.18f);
-		label.setPadding(0, 0, 0, dp(10));
-		card.addView(label);
+		card.setPadding(dp(16), 0, dp(16), 0);
+		LinearLayout header = new LinearLayout(this);
+		header.setOrientation(LinearLayout.HORIZONTAL);
+		header.setGravity(Gravity.CENTER_VERTICAL);
+		header.setPadding(0, dp(15), 0, dp(15));
+		makeClickable(header);
+		View light = new View(this);
+		GradientDrawable orb = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0xFFBFD4FF, C_ACCENT });
+		orb.setShape(GradientDrawable.OVAL);
+		light.setBackground(orb);
+		LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(6), dp(6));
+		orbLp.rightMargin = dp(12);
+		header.addView(light, orbLp);
+		TextView label = text(title, 13, C_SECTION, false);
+		label.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		label.setLetterSpacing(0.22f);
+		header.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		TextView chevron = text("", 18, C_ACCENT, false);
+		chevron.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		header.addView(chevron);
+		card.addView(header);
+		final LinearLayout content = new LinearLayout(this);
+		content.setOrientation(LinearLayout.VERTICAL);
+		content.setPadding(0, dp(2), 0, dp(16));
+		card.addView(content);
+		final String key = K_SECTION_OPEN + title;
+		boolean open = prefs.getBoolean(key, "JUEGO".equals(title));
+		content.setVisibility(open ? View.VISIBLE : View.GONE);
+		chevron.setText(open ? "−" : "+");
+		light.setAlpha(open ? 1f : 0.45f);
+		header.setOnClickListener(v -> {
+			boolean nowOpen = content.getVisibility() != View.VISIBLE;
+			content.setVisibility(nowOpen ? View.VISIBLE : View.GONE);
+			chevron.setText(nowOpen ? "−" : "+");
+			light.setAlpha(nowOpen ? 1f : 0.45f);
+			prefs.edit().putBoolean(key, nowOpen).apply();
+		});
 		parent.addView(card, cardParams());
-		return card;
+		return content;
 	}
 
 	private LinearLayout card(int strokeColor) {
@@ -5242,15 +5300,15 @@ public class LauncherActivity extends Activity {
 		card.setPadding(dp(16), dp(16), dp(16), dp(16));
 		GradientDrawable bg = new GradientDrawable();
 		bg.setColor(C_CARD);
-		bg.setCornerRadius(dp(16));
-		bg.setStroke(dp(1), strokeColor);
+		bg.setCornerRadius(dp(8));
+		bg.setStroke(Math.max(1, dp(0.75f)), strokeColor);
 		card.setBackground(bg);
 		return card;
 	}
 
 	private LinearLayout.LayoutParams cardParams() {
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-		lp.topMargin = dp(16);
+		lp.topMargin = dp(10);
 		return lp;
 	}
 
@@ -5269,7 +5327,7 @@ public class LauncherActivity extends Activity {
 		if (Build.VERSION.SDK_INT >= 23) {
 			int[][] states = { { android.R.attr.state_checked }, {} };
 			sw.setThumbTintList(new ColorStateList(states, new int[] { C_ACCENT, 0xFFBDBDC6 }));
-			sw.setTrackTintList(new ColorStateList(states, new int[] { 0x99D7263D, 0xFF4A4A55 }));
+			sw.setTrackTintList(new ColorStateList(states, new int[] { 0x996F9BFF, 0xFF2A3350 }));
 		}
 		row.addView(sw);
 		// Tapping anywhere on the row toggles the switch.
@@ -5289,7 +5347,7 @@ public class LauncherActivity extends Activity {
 		e.setFilters(new InputFilter[] { new InputFilter.LengthFilter(maxLength) });
 		e.setPadding(dp(14), dp(12), dp(14), dp(12));
 		GradientDrawable bg = new GradientDrawable();
-		bg.setColor(0xFF101015);
+		bg.setColor(0x99070B18);
 		bg.setCornerRadius(dp(12));
 		bg.setStroke(dp(1.5f), C_CHIP_STROKE);
 		e.setBackground(bg);
@@ -5326,7 +5384,7 @@ public class LauncherActivity extends Activity {
 		t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
 		t.setTextColor(color);
 		if (bold) {
-			t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+			t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
 		}
 		t.setLineSpacing(0, 1.12f);
 		return t;
@@ -5336,9 +5394,20 @@ public class LauncherActivity extends Activity {
 		TextView b = text(label, sp, Color.WHITE, true);
 		b.setGravity(Gravity.CENTER);
 		b.setPadding(dp(16), dp(12), dp(16), dp(12));
-		b.setBackground(ripple(C_ACCENT, 0, 14));
+		b.setBackground(glass(6));
 		makeClickable(b);
 		return b;
+	}
+
+	/** The PS2's lit buttons: a blue glass gradient with a thin light edge. */
+	private Drawable glass(float radiusDp) {
+		GradientDrawable shape = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0xFF3D6AE0, 0xFF2346A8, 0xFF16307A });
+		shape.setCornerRadius(dp(radiusDp));
+		shape.setStroke(Math.max(1, dp(1)), 0xFF8FB2FF);
+		GradientDrawable mask = new GradientDrawable();
+		mask.setColor(Color.WHITE);
+		mask.setCornerRadius(dp(radiusDp));
+		return new RippleDrawable(ColorStateList.valueOf(0x55FFFFFF), shape, mask);
 	}
 
 	private TextView outlineButton(String label) {
@@ -5360,8 +5429,9 @@ public class LauncherActivity extends Activity {
 	}
 
 	private void styleChip(TextView chip, boolean selected) {
-		chip.setBackground(selected ? ripple(C_ACCENT, 0, 12) : ripple(Color.TRANSPARENT, C_CHIP_STROKE, 12));
+		chip.setBackground(selected ? glass(5) : ripple(Color.TRANSPARENT, C_CHIP_STROKE, 5));
 		chip.setTextColor(selected ? Color.WHITE : C_MUTED);
+		chip.setShadowLayer(selected ? dp(6) : 0, 0, 0, selected ? 0xCCBFD4FF : 0);
 		chip.setSelected(selected);
 	}
 
@@ -5371,11 +5441,13 @@ public class LauncherActivity extends Activity {
 	}
 
 	private Drawable ripple(int fill, int stroke, float radiusDp) {
+		// Sharper corners than before: the PS2's menus are made of thin straight lines.
+		radiusDp = Math.min(radiusDp, 6f);
 		GradientDrawable shape = new GradientDrawable();
 		shape.setColor(fill);
 		shape.setCornerRadius(dp(radiusDp));
 		if (stroke != 0) {
-			shape.setStroke(dp(1.5f), stroke);
+			shape.setStroke(Math.max(1, dp(1f)), stroke);
 		}
 		GradientDrawable mask = new GradientDrawable();
 		mask.setColor(Color.WHITE);
@@ -5396,7 +5468,7 @@ public class LauncherActivity extends Activity {
 		if (Build.VERSION.SDK_INT >= 21) {
 			seek.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
 			seek.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
-			seek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF4A4A55));
+			seek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2A3350));
 		}
 		seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 			@Override

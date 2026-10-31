@@ -12,6 +12,7 @@ Por dentro usa el motor de emulación de [PPSSPP](https://www.ppsspp.org/) con u
 
 | | |
 |---|---|
+| **Estilo PS2** | La pantalla de inicio tiene un estilo minimalista y retro, como los menús de PlayStation 2: fondo azul oscuro con las torres de luz del arranque, letras finas y cada sección en una línea que se abre y se cierra (+ / −), así la pantalla queda corta. |
 | **Arranque directo** | Sin menús de emulador: pulsas *Jugar* y entra el juego. |
 | **Resolución 1× a 8×** | 1× = 480×272 (PSP original) · 4× = 1920×1088 (Full HD) · **8× = 3840×2176 (4K)**. Te recomienda la mejor para tu pantalla. |
 | **También BlazBlue** | Abre **BlazBlue: Calamity Trigger** (US ULUS-10519, EU ULES-01497, JP ULJM-05613) y también Continuum Shift II. La app lo reconoce y adapta los botones arcade (**A, B y C** arriba, **D** abajo), los textos y los controles por gestos (cadena A → B → C, Drive, agarre B+C, Rapid Cancel y Barrier Burst). Con el **Catálogo** cambias entre Guilty Gear, BlazBlue y KOF sin volver a buscar el archivo. Resolución, efectos, FSR, multijugador, prueba del equipo, **HUD propio** y **perfiles por personaje** también funcionan (CT americano y europeo, CS II americano); el visor de hitboxes es solo de Guilty Gear. |

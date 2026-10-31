@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<color name="launcher_background">#FF0D0D11</color>
-	<color name="launcher_accent">#FFD7263D</color>
+	<color name="launcher_background">#FF02040B</color>
+	<color name="launcher_accent">#FF6F9BFF</color>
 
 	<style name="LauncherTheme" parent="@android:style/Theme.Material.NoActionBar">
 		<item name="android:windowBackground">@color/launcher_background</item>
