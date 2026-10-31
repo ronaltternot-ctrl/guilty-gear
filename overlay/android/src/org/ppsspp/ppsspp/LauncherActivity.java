@@ -124,6 +124,8 @@ public class LauncherActivity extends Activity {
 	private static final String K_BENCH = "bench_result";
 	private static final String K_BENCH_ASKED = "bench_asked";
 	private static final String K_HUD_ON = "hud_enabled";
+	/** «Tu música»: the list of songs shown (true) or folded away (false, the default). */
+	private static final String K_MUSIC_OPEN = "music_list_open";
 	private static final String K_HUD_DESIGN = "hud_design";
 	private static final String K_HUD_ALPHA = "hud_opacity";
 	private static final String[] HUD_NAMES = { "Neón", "Arcade", "Lateral", "Datos" };
@@ -385,6 +387,10 @@ public class LauncherActivity extends Activity {
 	private final List<View> effectRows = new ArrayList<>();
 	private Switch musicSwitch;
 	private LinearLayout musicList;
+	private LinearLayout musicListHeader;
+	private TextView musicListTitle;
+	private TextView musicListInfo;
+	private TextView musicListChevron;
 	private LinearLayout musicOptions;
 	private Switch musicShuffle;
 	private Switch musicMuteAll;
@@ -393,6 +399,9 @@ public class LauncherActivity extends Activity {
 	private TextView musicNote;
 	private final TextView[] musicSystemChips = new TextView[MusicPlayer.SYSTEMS.length];
 	private android.media.MediaPlayer musicPreview;
+	private final TextView[] retroFxChips = new TextView[RetroEffects.EFFECTS.length];
+	private ImageView retroFxPreview;
+	private TextView retroFxDesc;
 	private File musicPreviewFile;
 	private TextView benchSummary;
 	private TextView benchDetail;
@@ -1336,6 +1345,7 @@ public class LauncherActivity extends Activity {
 		refreshBenchmark();
 		refreshHud();
 		refreshMusic();
+		refreshRetroEffects();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -2447,6 +2457,84 @@ public class LauncherActivity extends Activity {
 	}
 
 	// -------------------------------------------------------------------------------------------
+	// «EFECTOS · PS1 Y ARCADE»: the PSP's visual effects on the libretro screen (RetroEffects)
+
+	/** ArcadeActivity's settings (one file per system; written by the game's process too). */
+	@SuppressWarnings("deprecation")
+	private SharedPreferences retroPrefs(String system) {
+		return getSharedPreferences(system, MODE_PRIVATE | MODE_MULTI_PROCESS);
+	}
+
+	private void buildRetroEffectsSection(LinearLayout col) {
+		LinearLayout fx = section(col, "EFECTOS · PS1 Y ARCADE");
+		TextView intro = text("Los mismos efectos de imagen que los juegos de PSP, para PlayStation 1 y Arcade / Neo Geo.", 13, C_MUTED, false);
+		intro.setPadding(0, 0, 0, dp(10));
+		fx.addView(intro);
+		RetroEffects.Effect[] effects = RetroEffects.EFFECTS;
+		for (int row = 0; row * 4 < effects.length; row++) {
+			LinearLayout chips = new LinearLayout(this);
+			chips.setOrientation(LinearLayout.HORIZONTAL);
+			for (int c = 0; c < 4; c++) {
+				int index = row * 4 + c;
+				if (index >= effects.length) {
+					chips.addView(new View(this), weighted(dp(4), 0));
+					continue;
+				}
+				final RetroEffects.Effect effect = effects[index];
+				TextView chip = chip(effect.label);
+				chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+				chip.setOnClickListener(v -> {
+					// The same for both: PS1 and arcade games each keep it (and change it in their menu).
+					retroPrefs(PsxLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
+					retroPrefs(ArcadeLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
+					refreshRetroEffects();
+				});
+				retroFxChips[index] = chip;
+				LinearLayout.LayoutParams lp = weighted(c == 0 ? 0 : dp(4), c == 3 ? 0 : dp(4));
+				lp.bottomMargin = dp(8);
+				chips.addView(chip, lp);
+			}
+			fx.addView(chips);
+		}
+		retroFxPreview = new ImageView(this);
+		retroFxPreview.setAdjustViewBounds(true);
+		retroFxPreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+		GradientDrawable previewBg = new GradientDrawable();
+		previewBg.setColor(Color.BLACK);
+		previewBg.setCornerRadius(dp(10));
+		retroFxPreview.setBackground(previewBg);
+		retroFxPreview.setClipToOutline(true);
+		LinearLayout.LayoutParams pvLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		pvLp.topMargin = dp(4);
+		fx.addView(retroFxPreview, pvLp);
+		retroFxDesc = text("", 13, C_MUTED, false);
+		retroFxDesc.setPadding(0, dp(8), 0, 0);
+		fx.addView(retroFxDesc);
+		TextView note = text("Solo cambian la imagen final, no los gráficos del juego. En el juego también lo cambias: botón Atrás o ❚❚ → Imagen. IA y AMD FSR piden más al teléfono.", 12, C_MUTED, false);
+		note.setPadding(0, dp(8), 0, 0);
+		fx.addView(note);
+	}
+
+	private void refreshRetroEffects() {
+		if (retroFxDesc == null) {
+			return;
+		}
+		RetroEffects.Effect current = RetroEffects.find(retroPrefs(PsxLibrary.SYSTEM).getString("shader", "sharp"));
+		for (int i = 0; i < RetroEffects.EFFECTS.length; i++) {
+			styleChip(retroFxChips[i], RetroEffects.EFFECTS[i] == current);
+		}
+		if (current.preview != 0) {
+			retroFxPreview.setImageResource(current.preview);
+			retroFxPreview.setContentDescription("Vista previa del efecto " + current.label);
+			retroFxPreview.setVisibility(View.VISIBLE);
+		} else {
+			retroFxPreview.setVisibility(View.GONE);
+		}
+		retroFxDesc.setText(current.description + (current.preview != 0 && !"sharp".equals(current.id) && !"none".equals(current.id)
+			? " (Vista previa con una imagen de ejemplo.)" : ""));
+	}
+
+	// -------------------------------------------------------------------------------------------
 	// «TU MÚSICA»: the player's songs instead of the games' music (MusicPlayer)
 
 	private boolean refreshingMusic;
@@ -2468,9 +2556,34 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		addLp.topMargin = dp(14);
 		music.addView(add, addLp);
+
+		// The songs fold away under one line (a long list made the screen endless).
+		musicListHeader = new LinearLayout(this);
+		musicListHeader.setOrientation(LinearLayout.HORIZONTAL);
+		musicListHeader.setGravity(Gravity.CENTER_VERTICAL);
+		musicListHeader.setPadding(dp(14), dp(12), dp(12), dp(12));
+		musicListHeader.setBackground(ripple(0xFF1C1C24, C_CHIP_STROKE, 12));
+		makeClickable(musicListHeader);
+		LinearLayout headerTexts = new LinearLayout(this);
+		headerTexts.setOrientation(LinearLayout.VERTICAL);
+		musicListTitle = text("Mis canciones", 15, C_TEXT, true);
+		headerTexts.addView(musicListTitle);
+		musicListInfo = text("", 12, C_MUTED, false);
+		musicListInfo.setPadding(0, dp(2), 0, 0);
+		headerTexts.addView(musicListInfo);
+		musicListHeader.addView(headerTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		musicListChevron = text("", 18, C_ACCENT, true);
+		musicListHeader.addView(musicListChevron);
+		musicListHeader.setOnClickListener(v -> {
+			prefs.edit().putBoolean(K_MUSIC_OPEN, !prefs.getBoolean(K_MUSIC_OPEN, false)).apply();
+			refreshMusic();
+		});
+		LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		headerLp.topMargin = dp(12);
+		music.addView(musicListHeader, headerLp);
 		musicList = new LinearLayout(this);
 		musicList.setOrientation(LinearLayout.VERTICAL);
-		musicList.setPadding(0, dp(10), 0, 0);
+		musicList.setPadding(0, dp(6), 0, 0);
 		music.addView(musicList);
 
 		musicOptions = new LinearLayout(this);
@@ -2582,8 +2695,12 @@ public class LauncherActivity extends Activity {
 		}
 		musicList.removeAllViews();
 		if (tracks.isEmpty()) {
-			musicList.addView(text("Todavía no subiste canciones. Sirven MP3, M4A, OGG, FLAC, WAV y MIDI, y puedes elegir varias a la vez.", 13, C_MUTED, false));
+			musicListHeader.setVisibility(View.GONE);
+			TextView empty = text("Todavía no subiste canciones. Sirven MP3, M4A, OGG, FLAC, WAV y MIDI, y puedes elegir varias a la vez.", 13, C_MUTED, false);
+			empty.setPadding(0, dp(6), 0, 0);
+			musicList.addView(empty);
 		} else {
+			boolean open = prefs.getBoolean(K_MUSIC_OPEN, false);
 			java.util.Properties lengths = MusicPlayer.durations(this);
 			long bytes = 0;
 			long ms = 0;
@@ -2591,12 +2708,16 @@ public class LauncherActivity extends Activity {
 				long len = parseLong(lengths.getProperty(f.getName()));
 				bytes += f.length();
 				ms += Math.max(0, len);
-				musicList.addView(musicRow(f, len));
+				if (open) {
+					musicList.addView(musicRow(f, len));
+				}
 			}
-			TextView total = text((tracks.size() == 1 ? "1 canción" : tracks.size() + " canciones")
-				+ (ms > 0 ? " · " + MusicPlayer.formatDuration(ms) : "") + " · " + FileOps.mb(bytes), 12, C_MUTED, false);
-			total.setPadding(0, dp(6), 0, 0);
-			musicList.addView(total);
+			musicListHeader.setVisibility(View.VISIBLE);
+			musicListTitle.setText(open ? "Ocultar mis canciones" : "Ver mis canciones");
+			musicListInfo.setText((tracks.size() == 1 ? "1 canción" : tracks.size() + " canciones")
+				+ (ms > 0 ? " · " + MusicPlayer.formatDuration(ms) : "") + " · " + FileOps.mb(bytes)
+				+ (musicPreviewFile != null && !open ? " · sonando: " + MusicPlayer.title(musicPreviewFile) : ""));
+			musicListChevron.setText(open ? "▴" : "▾");
 		}
 		musicOptions.setVisibility(tracks.isEmpty() ? View.GONE : View.VISIBLE);
 		musicNote.setText(musicNoteText(s, tracks.isEmpty()));
@@ -4471,6 +4592,8 @@ public class LauncherActivity extends Activity {
 		TextView fxNote = text("Solo cambian la imagen final: los sprites del juego no se tocan. Puedes afinar cada efecto en el juego: Pausa → Ajustes → Gráficos.", 13, C_MUTED, false);
 		fxNote.setPadding(0, dp(8), 0, 0);
 		effects.addView(fxNote);
+
+		buildRetroEffectsSection(col);
 
 		// Controls
 		LinearLayout controls = section(col, "CONTROLES");

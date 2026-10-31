@@ -23,8 +23,10 @@ import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
 
+import com.swordfish.libretrodroid.GLRetroShader;
 import com.swordfish.libretrodroid.GLRetroView;
 import com.swordfish.libretrodroid.GLRetroViewData;
+import com.swordfish.libretrodroid.LibretroDroid;
 import com.swordfish.libretrodroid.ShaderConfig;
 import com.swordfish.libretrodroid.Variable;
 
@@ -36,6 +38,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.Map;
 
 import kotlin.Unit;
 import kotlinx.coroutines.GlobalScope;
@@ -81,8 +84,6 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private static final int KEY_3P = KeyEvent.KEYCODE_BUTTON_L2, KEY_3K = KeyEvent.KEYCODE_BUTTON_R2;
 	private static final int C_PUNCH = 0xFFFF6B5A, C_KICK = 0xFF55A8FF;
 
-	static final String[] SHADERS = { "sharp", "cut", "crt", "lcd", "none" };
-	static final String[] SHADER_NAMES = { "Nítida (píxeles limpios)", "Suavizada (bordes redondeados)", "CRT (televisor)", "LCD", "Original" };
 
 	private final Handler handler = new Handler(Looper.getMainLooper());
 	private SharedPreferences prefs;
@@ -99,6 +100,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private MusicPlayer music;
 	/** The game's own sound stays off: arcade boards mix music and effects, or the player asked. */
 	private boolean muteGame;
+	private boolean effectApplied;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -148,7 +150,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		data.setSystemDirectory(system.getAbsolutePath());
 		data.setSavesDirectory(saves.getAbsolutePath());
 		data.setVariables(variables());
-		data.setShader(shader(prefs.getString("shader", "sharp")));
+		// LibretroDroid's own shader to start with; the PSP's effects go in at onStart (applyEffect).
+		ShaderConfig builtin = RetroEffects.builtin(prefs.getString("shader", "sharp"));
+		data.setShader(builtin != null ? builtin : ShaderConfig.Sharp.INSTANCE);
 		data.setPreferLowLatencyAudio(true);
 		data.setRumbleEventsEnabled(false);
 		byte[] sram = readFile(sramFile());
@@ -209,19 +213,41 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		};
 	}
 
-	static ShaderConfig shader(String id) {
-		switch (id) {
-			case "cut":
-				return new ShaderConfig.CUT2();
-			case "crt":
-				return ShaderConfig.CRT.INSTANCE;
-			case "lcd":
-				return ShaderConfig.LCD.INSTANCE;
-			case "none":
-				return ShaderConfig.Default.INSTANCE;
-			default:
-				return ShaderConfig.Sharp.INSTANCE;
+	/**
+	 * The visual effect (RetroEffects): LibretroDroid's own shader, or one of the PSP's effects as a
+	 * custom chain of passes. Called once the core exists, or while the game is paused.
+	 */
+	private void applyEffect(String id) {
+		if (retro == null) {
+			return;
 		}
+		ShaderConfig builtin = RetroEffects.builtin(id);
+		if (builtin != null) {
+			retro.setShader(builtin);
+			return;
+		}
+		Map<String, String> chain = null;
+		if (!RetroEffects.needsGles3(id) || glesVersion() >= 0x30000) {
+			android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+			chain = RetroEffects.chain(this, id, RetroEffects.fsrScale(Math.max(dm.widthPixels, dm.heightPixels), Math.min(dm.widthPixels, dm.heightPixels)));
+		}
+		if (chain == null) {
+			retro.setShader(ShaderConfig.Sharp.INSTANCE);
+			return;
+		}
+		try {
+			// LibretroDroid rebuilt with patches/libretrodroid/0001: if the GPU can't compile the
+			// chain, it falls back to the sharp shader by itself.
+			LibretroDroid.setShaderConfig(new GLRetroShader(RetroEffects.SHADER_CUSTOM, chain));
+		} catch (Throwable t) {
+			Log.w(TAG, "Effect " + id, t);
+			retro.setShader(ShaderConfig.Sharp.INSTANCE);
+		}
+	}
+
+	private int glesVersion() {
+		android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+		return am == null ? 0 : am.getDeviceConfigurationInfo().reqGlEsVersion;
 	}
 
 	private void applyPadSettings() {
@@ -312,6 +338,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		super.onStart();
 		// The core is created now (the view's ON_CREATE), and it starts with its sound on.
 		applyGameAudio();
+		if (!effectApplied) {
+			effectApplied = true;
+			applyEffect(prefs.getString("shader", "sharp"));
+		}
 	}
 
 	private void onRetroError(int code) {
@@ -436,13 +466,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		final boolean hires = prefs.getBoolean("hires", false);
 		final boolean hidden = prefs.getBoolean("hide_pad", false);
 		final boolean six = sixButtons();
-		String shaderId = prefs.getString("shader", "sharp");
-		String shaderName = SHADER_NAMES[0];
-		for (int i = 0; i < SHADERS.length; i++) {
-			if (SHADERS[i].equals(shaderId)) {
-				shaderName = SHADER_NAMES[i];
-			}
-		}
+		String shaderName = RetroEffects.find(prefs.getString("shader", "sharp")).label;
 		final java.util.List<String> labels = new java.util.ArrayList<>();
 		final java.util.List<MenuAction> actions = new java.util.ArrayList<>();
 		labels.add("▶  Continuar");
@@ -533,18 +557,22 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private void pickShader() {
-		String current = prefs.getString("shader", "sharp");
+		String current = RetroEffects.find(prefs.getString("shader", "sharp")).id;
+		final RetroEffects.Effect[] effects = RetroEffects.EFFECTS;
+		String[] names = new String[effects.length];
 		int checked = 0;
-		for (int i = 0; i < SHADERS.length; i++) {
-			if (SHADERS[i].equals(current)) {
+		for (int i = 0; i < effects.length; i++) {
+			names[i] = effects[i].label;
+			if (effects[i].id.equals(current)) {
 				checked = i;
 			}
 		}
 		new AlertDialog.Builder(this)
-			.setTitle("Imagen")
-			.setSingleChoiceItems(SHADER_NAMES, checked, (d, which) -> {
-				prefs.edit().putString("shader", SHADERS[which]).apply();
-				retro.setShader(shader(SHADERS[which]));
+			.setTitle("Imagen (efectos)")
+			.setSingleChoiceItems(names, checked, (d, which) -> {
+				prefs.edit().putString("shader", effects[which].id).apply();
+				applyEffect(effects[which].id);
+				Toast.makeText(this, effects[which].description, Toast.LENGTH_SHORT).show();
 				d.dismiss();
 				closeMenu();
 			})

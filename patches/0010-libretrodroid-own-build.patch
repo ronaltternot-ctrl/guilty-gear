@@ -1,0 +1,14 @@
+diff --git a/android/build.gradle.kts b/android/build.gradle.kts
+--- a/android/build.gradle.kts
++++ b/android/build.gradle.kts
+@@ -177,6 +177,10 @@
+ 		jniLibs.useLegacyPackaging = true
+ 		// Launcher build: the Apache Commons jars all bring these.
+ 		resources.excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES", "META-INF/versions/9/module-info.class")
++		// Launcher build: LibretroDroid's native library rebuilt with custom shader chains
++		// (scripts/build_libretrodroid.sh puts it in extlibs): the app's own copy is picked
++		// over the one in the AAR. The workflow checks the APK carries this one.
++		jniLibs.pickFirsts += "**/liblibretrodroid.so"
+ 	}
+ 	sourceSets {
+ 		getByName("main") {

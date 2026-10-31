@@ -1,0 +1,113 @@
+diff --git a/libretrodroid/src/main/cpp/shadermanager.h b/libretrodroid/src/main/cpp/shadermanager.h
+--- a/libretrodroid/src/main/cpp/shadermanager.h
++++ b/libretrodroid/src/main/cpp/shadermanager.h
+@@ -51,6 +51,8 @@
+         SHADER_UPSCALE_CUT = 4,
+         SHADER_UPSCALE_CUT2 = 5,
+         SHADER_UPSCALE_CUT3 = 6,
++        // GGXX AC+ launcher build: a whole chain of passes sent from Java (see getShader()).
++        SHADER_CUSTOM = 100,
+     };
+ 
+     struct Config {
+@@ -89,6 +91,8 @@
+     static const std::string cut3UpscalePass2Fragment;
+ 
+ private:
++    static Chain customChain(const std::unordered_map<std::string, std::string>& params);
++
+     static std::string buildDefines(
+         std::unordered_map<std::string, std::string> baseParams,
+         std::unordered_map<std::string, std::string> customParams
+diff --git a/libretrodroid/src/main/cpp/shadermanager.cpp b/libretrodroid/src/main/cpp/shadermanager.cpp
+--- a/libretrodroid/src/main/cpp/shadermanager.cpp
++++ b/libretrodroid/src/main/cpp/shadermanager.cpp
+@@ -17,6 +17,8 @@
+ 
+ #include "shadermanager.h"
+ 
++#include <cstdlib>
++
+ namespace libretrodroid {
+ 
+ const std::string ShaderManager::defaultShaderVertex =
+@@ -1602,7 +1604,46 @@
+             false
+         };
+     }
++
++    case Type::SHADER_CUSTOM: {
++        Chain chain = customChain(config.params);
++        if (!chain.passes.empty()) {
++            return chain;
++        }
++        break;
++    }
+ }
++    // Unknown type, or a custom chain without passes: the sharp shader.
++    return { { { defaultShaderVertex, defaultSharpFragment, true, 1.0 } }, true };
++}
++
++/*
++ * GGXX AC+ launcher build: the passes of a SHADER_CUSTOM chain, from the params map:
++ *   PASSES          number of passes (1 to 8)
++ *   LINEAR          "1": the game's frame is sampled with linear filtering
++ *   P<i>_VERTEX     vertex shader of pass i (GLSL ES 1.00)
++ *   P<i>_FRAGMENT   fragment shader of pass i
++ *   P<i>_SCALE      size of pass i's output, times the game's frame (the last pass draws to the screen)
++ *   P<i>_LINEAR     "1": the next pass samples pass i's output with linear filtering
++ */
++ShaderManager::Chain ShaderManager::customChain(const std::unordered_map<std::string, std::string>& params) {
++    auto get = [&params](const std::string& key, const std::string& fallback) {
++        auto it = params.find(key);
++        return it == params.end() ? fallback : it->second;
++    };
++    Chain chain { {}, get("LINEAR", "0") == "1" };
++    int passes = std::atoi(get("PASSES", "0").c_str());
++    for (int i = 0; i < passes && i < 8; i++) {
++        std::string prefix = "P" + std::to_string(i) + "_";
++        std::string vertex = get(prefix + "VERTEX", "");
++        std::string fragment = get(prefix + "FRAGMENT", "");
++        float scale = (float) std::atof(get(prefix + "SCALE", "1").c_str());
++        if (vertex.empty() || fragment.empty() || !(scale > 0.0f && scale <= 16.0f)) {
++            return { {}, false };
++        }
++        chain.passes.push_back({ vertex, fragment, get(prefix + "LINEAR", "0") == "1", scale });
++    }
++    return chain;
+ }
+ 
+ std::string ShaderManager::buildDefines(
+diff --git a/libretrodroid/src/main/cpp/video.cpp b/libretrodroid/src/main/cpp/video.cpp
+--- a/libretrodroid/src/main/cpp/video.cpp
++++ b/libretrodroid/src/main/cpp/video.cpp
+@@ -108,6 +108,29 @@
+ 
+     auto shaders = ShaderManager::getShader(requestedShaderConfig);
+ 
++    // GGXX AC+ launcher build: a custom chain the GPU can't compile falls back to the sharp
++    // shader, instead of stopping the game.
++    if (requestedShaderConfig.type == ShaderManager::Type::SHADER_CUSTOM) {
++        bool compiles = true;
++        for (const auto& item : shaders.passes) {
++            GLuint program = createProgram(item.vertex.data(), item.fragment.data());
++            if (!program) {
++                compiles = false;
++                break;
++            }
++            glDeleteProgram(program);
++        }
++        if (!compiles) {
++            LOGE("Custom shader chain doesn't compile, using the sharp shader.");
++            shaders = ShaderManager::getShader(ShaderManager::Config { ShaderManager::Type::SHADER_SHARP, {} });
++        }
++    }
++
++    for (const auto& entry : shadersChain) {
++        if (entry.gProgram) {
++            glDeleteProgram(entry.gProgram);
++        }
++    }
+     shadersChain = {};
+ 
+     std::for_each(shaders.passes.begin(), shaders.passes.end(), [&](const auto& item){
