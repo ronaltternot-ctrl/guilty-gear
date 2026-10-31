@@ -2100,9 +2100,11 @@ public class LauncherActivity extends Activity {
 		i.putExtra(ArcadeActivity.EXTRA_ROM, rom.getAbsolutePath());
 		i.putExtra(ArcadeActivity.EXTRA_TITLE, title);
 		i.putExtra(ArcadeActivity.EXTRA_SYSTEM, system);
+		GameRun.launching(this, ":arcade", title, rom.getName());
 		try {
 			startActivity(i);
 		} catch (RuntimeException ex) {
+			GameRun.end(this);
 			Log.w(TAG, "Arcade", ex);
 			showMessage("No se pudo abrir el juego", String.valueOf(ex.getMessage()));
 		}
@@ -2129,9 +2131,11 @@ public class LauncherActivity extends Activity {
 			Intent i = new Intent(this, MugenActivity.class);
 			i.putExtra(MugenActivity.EXTRA_PATH, root.getAbsolutePath());
 			i.putExtra(MugenActivity.EXTRA_TITLE, title);
+			GameRun.launching(this, ":mugen", title, root.getAbsolutePath());
 			try {
 				startActivity(i);
 			} catch (RuntimeException ex) {
+				GameRun.end(this);
 				Log.w(TAG, "MUGEN", ex);
 				showMessage("No se pudo abrir el juego", String.valueOf(ex.getMessage()));
 			}

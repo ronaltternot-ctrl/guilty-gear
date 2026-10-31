@@ -105,11 +105,13 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		super.onCreate(savedInstanceState);
 		psx = PsxLibrary.SYSTEM.equals(getIntent().getStringExtra(EXTRA_SYSTEM));
 		prefs = getSharedPreferences(psx ? "psx" : "arcade", MODE_PRIVATE);
-		goFullscreen();
 
 		FrameLayout root = new FrameLayout(this);
 		root.setBackgroundColor(Color.BLACK);
 		setContentView(root);
+		// After setContentView: before it the window has no decor view yet, and on Android 11+
+		// getInsetsController() then fails (that closed every arcade and PS1 game at once).
+		goFullscreen();
 
 		String path = getIntent().getStringExtra(EXTRA_ROM);
 		title = getIntent().getStringExtra(EXTRA_TITLE);
@@ -698,7 +700,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		}
 		if (Build.VERSION.SDK_INT >= 30) {
 			w.setDecorFitsSystemWindows(false);
-			WindowInsetsController c = w.getInsetsController();
+			// Through the decor view, which getDecorView() creates if needed (Window.getInsetsController()
+			// throws when there's no decor yet).
+			WindowInsetsController c = w.getDecorView().getWindowInsetsController();
 			if (c != null) {
 				c.hide(WindowInsets.Type.systemBars());
 				c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);

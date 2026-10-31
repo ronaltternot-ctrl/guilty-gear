@@ -57,15 +57,27 @@ final class GameRun {
 		}
 	}
 
-	/** At the start of a game, in its own process (":arcade", ":mugen"). */
-	static void begin(Context c, String process, String title, String detail) {
+	private static Properties fresh(String process, String title, String detail, String step) {
 		Properties p = new Properties();
 		p.setProperty("process", process);
 		p.setProperty("title", title == null ? "" : title);
 		p.setProperty("detail", detail == null ? "" : detail);
 		p.setProperty("start", String.valueOf(System.currentTimeMillis()));
-		p.setProperty("step", "abriendo");
-		save(c, p);
+		p.setProperty("step", step);
+		return p;
+	}
+
+	/**
+	 * In the launcher, just before it opens a game's screen: if the game's process dies before
+	 * its own begin() (while Android creates the screen), the launcher still has this to report.
+	 */
+	static void launching(Context c, String process, String title, String detail) {
+		save(c, fresh(process, title, detail, "abriendo la pantalla del juego"));
+	}
+
+	/** At the start of a game, in its own process (":arcade", ":mugen"). */
+	static void begin(Context c, String process, String title, String detail) {
+		save(c, fresh(process, title, detail, "abriendo"));
 		final Context app = c.getApplicationContext();
 		final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
 		Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
@@ -226,8 +238,55 @@ final class GameRun {
 			for (int i = 0; i < lines.length && i < 12; i++) {
 				out.append(lines[i].trim()).append('\n');
 			}
+		} else {
+			// No Java trace saved (the process died before it could): what the log kept.
+			String log = crashLog();
+			if (!log.isEmpty()) {
+				out.append("\nRegistro:\n").append(log).append('\n');
+			}
 		}
 		return out.toString().trim();
+	}
+
+	/**
+	 * The last crash lines of this app from Android's log (the crash buffer: Java exceptions and
+	 * native crash backtraces). An app can read its own lines without any permission.
+	 */
+	static String crashLog() {
+		java.util.ArrayDeque<String> keep = new java.util.ArrayDeque<>();
+		Process proc = null;
+		try {
+			proc = new ProcessBuilder("logcat", "-d", "-b", "crash", "-v", "brief", "-t", "400").redirectErrorStream(true).start();
+			try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(proc.getInputStream()))) {
+				String line;
+				int read = 0;
+				while ((line = r.readLine()) != null && read++ < 2000) {
+					String t = line.trim();
+					if (t.isEmpty() || t.startsWith("---------")) {
+						continue;
+					}
+					if (t.contains("FATAL") || t.contains("Exception") || t.contains("Error") || t.contains("Caused by")
+						|| t.contains("at org.ppsspp") || t.contains("at com.swordfish") || t.contains("at androidx")
+						|| t.contains("Abort message") || t.contains("signal ") || t.contains("Cause:") || t.matches(".*#0[0-9] pc .*")) {
+						keep.addLast(t.length() > 170 ? t.substring(0, 170) : t);
+						if (keep.size() > 22) {
+							keep.removeFirst();
+						}
+					}
+				}
+			}
+		} catch (IOException | RuntimeException e) {
+			Log.w(TAG, "logcat", e);
+		} finally {
+			if (proc != null) {
+				proc.destroy();
+			}
+		}
+		StringBuilder b = new StringBuilder();
+		for (String l : keep) {
+			b.append(l).append('\n');
+		}
+		return b.toString().trim();
 	}
 
 	/** The library names and messages in a native crash report (a tombstone, Android 12+). */
