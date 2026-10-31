@@ -1,0 +1,218 @@
+diff --git a/Core/HLE/__sceAudio.cpp b/Core/HLE/__sceAudio.cpp
+--- a/Core/HLE/__sceAudio.cpp
++++ b/Core/HLE/__sceAudio.cpp
+@@ -38,6 +38,7 @@
+ #include "Core/HLE/sceKernelTime.h"
+ #include "Core/HLE/ErrorCodes.h"
+ #include "Core/HLE/__sceAudio.h"
++#include "Core/HLE/AcPlusMusicMute.h"
+ #include "Core/HLE/sceAudio.h"
+ #include "Core/HLE/sceKernel.h"
+ #include "Core/HLE/sceKernelThread.h"
+@@ -427,6 +428,9 @@
+ 
+ 	if (g_Config.bEnableSound) {
+ 		float multiplier = Volume100ToMultiplier(std::clamp(g_Config.iGameVolume, 0, VOLUMEHI_FULL));
++		// Launcher build: only the player's music is heard.
++		if (AcPlusMusicMute::All())
++			multiplier = 0.0f;
+ 		if (PSP_CoreParameter().fpsLimit != FPSLimit::NORMAL || PSP_CoreParameter().fastForward) {
+ 			if (g_Config.iAltSpeedVolume != -1) {
+ 				// Multiply in the alt speed volume instead of replacing like before.
+diff --git a/Core/HLE/sceAtrac.cpp b/Core/HLE/sceAtrac.cpp
+--- a/Core/HLE/sceAtrac.cpp
++++ b/Core/HLE/sceAtrac.cpp
+@@ -36,6 +36,7 @@
+ #include "Core/HLE/sceAtrac.h"
+ #include "Core/HLE/AtracCtx.h"
+ #include "Core/HLE/AtracCtx2.h"
++#include "Core/HLE/AcPlusMusicMute.h"
+ #include "Core/System.h"
+ 
+ // Notes about sceAtrac buffer management
+@@ -353,6 +354,9 @@
+ 	if (outPtr && g_muteFlag[atracID]) {
+ 		memset(outPtr, 0, atrac->GetOutputChannels() * 2 * numSamplesWritten);
+ 	}
++	// Launcher build: the player's music plays instead of the game's.
++	if (outPtr && ret == 0 && numSamplesWritten > 0)
++		AcPlusMusicMute::Silence(outPtr, atrac->GetOutputChannels() * 2 * numSamplesWritten);
+ 
+ 	if (ret == 0 || ret == SCE_ERROR_ATRAC_API_FAIL) {
+ 		// Decoded or at least attempted to decode data, delay thread
+@@ -1076,6 +1080,8 @@
+ 	if (g_muteFlag[atracID]) {
+ 		memset(outp, 0, bytesWritten);
+ 	}
++	// Launcher build: the player's music plays instead of the game's.
++	AcPlusMusicMute::Silence(outp, bytesWritten > 0 ? bytesWritten : 0);
+ 
+ 	NotifyMemInfo(MemBlockFlags::WRITE, samplesAddr, bytesWritten, "AtracLowLevelDecode");
+ 	return hleDelayResult(hleLogDebug(Log::Atrac, retval), "low level atrac decode data", atracDecodeDelay);
+diff --git a/Core/HLE/sceAudiocodec.cpp b/Core/HLE/sceAudiocodec.cpp
+--- a/Core/HLE/sceAudiocodec.cpp
++++ b/Core/HLE/sceAudiocodec.cpp
+@@ -25,6 +25,7 @@
+ #include "Core/MemMap.h"
+ #include "Core/Reporting.h"
+ #include "Core/HW/SimpleAudioDec.h"
++#include "Core/HLE/AcPlusMusicMute.h"
+ 
+ // Following kaien_fr's sample code https://github.com/hrydgard/ppsspp/issues/5620#issuecomment-37086024
+ // Should probably store the EDRAM get/release status somewhere within here, etc.
+@@ -264,6 +265,9 @@
+ 			ERROR_LOG(Log::ME, "AudioCodec decode failed. Setting error to %08x", ctx->err);
+ 		}
+ 
++		// Launcher build: the player's music plays instead of the game's (stereo 16-bit out).
++		AcPlusMusicMute::Silence(outBuf, outSamples > 0 ? (size_t)outSamples * 2 * sizeof(int16_t) : 0);
++
+ 		ctx->srcBytesRead = inDataConsumed;
+ 		ctx->dstSamplesWritten = outSamples;
+ 	}
+diff --git a/Core/HLE/sceMp3.cpp b/Core/HLE/sceMp3.cpp
+--- a/Core/HLE/sceMp3.cpp
++++ b/Core/HLE/sceMp3.cpp
+@@ -77,6 +77,7 @@
+ #include "Core/HLE/sceKernelMemory.h"
+ #include "Core/HLE/sceMp3.h"
+ #include "Core/HW/SimpleAudioDec.h"
++#include "Core/HLE/AcPlusMusicMute.h"
+ #include "Core/MemMap.h"
+ #include "Core/Reporting.h"
+ #include "Common/Serialize/SerializeFuncs.h"
+@@ -736,6 +737,8 @@
+ 		WARN_LOG(Log::ME, "sceMp3LowLevelDecode: Decode failed");
+ 	}
+ 	int outBytes = outSamples * sizeof(int16_t) * 2;
++	// Launcher build: the player's music plays instead of the game's.
++	AcPlusMusicMute::Silence(outbuf, outBytes > 0 ? outBytes : 0);
+ 	NotifyMemInfo(MemBlockFlags::WRITE, samplesAddr, outBytes, "Mp3LowLevelDecode");
+ 	
+ 	Memory::Write_U32(inbytesConsumed, sourceBytesConsumedAddr);
+diff --git a/Core/HW/SasAudio.cpp b/Core/HW/SasAudio.cpp
+--- a/Core/HW/SasAudio.cpp
++++ b/Core/HW/SasAudio.cpp
+@@ -27,6 +27,7 @@
+ #include "Core/Util/AudioFormat.h"
+ #include "Core/System.h"
+ #include "SasAudio.h"
++#include "Core/HLE/AcPlusMusicMute.h"
+ 
+ static const u8 f[16][2] = {
+ 	{   0,   0 },
+@@ -215,6 +216,9 @@
+ 	while (!finish && sampleQueue_->getQueueSize() < wantedbytes) {
+ 		int numSamples = 0;
+ 		AtracSasDecodeData(atracID_, (u8*)buf_, &numSamples, &finish);
++		// Launcher build: ATRAC3 through sceSas is music, the player's plays instead.
++		if (numSamples > 0)
++			AcPlusMusicMute::Silence(buf_, numSamples * sizeof(s16));
+ 		if (numSamples > 0)
+ 			sampleQueue_->push((u8*)buf_, numSamples * sizeof(s16));
+ 		else
+diff --git a/Core/HW/SimpleAudioDec.cpp b/Core/HW/SimpleAudioDec.cpp
+--- a/Core/HW/SimpleAudioDec.cpp
++++ b/Core/HW/SimpleAudioDec.cpp
+@@ -25,6 +25,7 @@
+ #include "Core/HW/MediaEngine.h"
+ #include "Core/HW/BufferQueue.h"
+ #include "Core/HW/Atrac3Standalone.h"
++#include "Core/HLE/AcPlusMusicMute.h"
+ 
+ #include "ext/minimp3/minimp3.h"
+ 
+@@ -515,6 +516,8 @@
+ 			AuBufAvailable = 0;
+ 			sourcebuff.clear();
+ 		} else {
++			// Launcher build: MP3 / AAC from sceMp3 and sceAac is music, the player's plays instead.
++			AcPlusMusicMute::Silence(outbuf, outpcmbufsize);
+ 			// Update our total decoded samples, but don't count stereo.
+ 			SumDecodedSamples += outSamples;
+ 			// get consumed source length
+diff --git a/UI/EmuScreen.cpp b/UI/EmuScreen.cpp
+--- a/UI/EmuScreen.cpp
++++ b/UI/EmuScreen.cpp
+@@ -88,6 +88,7 @@
+ #include "UI/AcPlusGestures.h"
+ #include "UI/AcPlusFsr.h"
+ #include "UI/AcPlusHud.h"
++#include "UI/AcPlusMusic.h"
+ #include "UI/DevScreens.h"
+ #include "UI/GameInfoCache.h"
+ #include "UI/BaseScreens.h"
+@@ -170,6 +171,8 @@
+ 
+ EmuScreen::EmuScreen(const Path &filename)
+ 	: gamePath_(filename) {
++	// Launcher build: the player's music instead of the game's (before the game boots).
++	AcPlusMusic::Apply();
+ 	saveStateSlot_ = SaveState::GetCurrentSlot();
+ 	g_controlMapper.AddListener(this);
+ 
+diff --git a/android/src/org/ppsspp/ppsspp/PpssppActivity.java b/android/src/org/ppsspp/ppsspp/PpssppActivity.java
+--- a/android/src/org/ppsspp/ppsspp/PpssppActivity.java
++++ b/android/src/org/ppsspp/ppsspp/PpssppActivity.java
+@@ -171,6 +171,9 @@
+ 	// Dedicated launcher mode (see LauncherActivity). When started from the launcher, we boot
+ 	// straight into the chosen game, and the ":emu" process ends when the game is closed.
+ 	private static boolean launchedFromLauncher = false;
++	// Launcher build: the player's songs instead of the game's music ("TU MÚSICA", MusicPlayer).
++	// Plays while the game runs: the emulator says so with set_keep_screen_bright (on in game).
++	private MusicPlayer launcherMusic;
+ 
+ 	private static boolean isLauncherIntent(Intent intent) {
+ 		return intent != null && intent.getBooleanExtra(LaunchContract.EXTRA_FROM_LAUNCHER, false);
+@@ -714,6 +717,9 @@
+ 		if (fromLauncher) {
+ 			launchedFromLauncher = true;
+ 		}
++		if (launchedFromLauncher && launcherMusic == null) {
++			launcherMusic = MusicPlayer.create(this, MusicPlayer.PSP);
++		}
+ 		if (shortcutParam != null) {
+ 			Log.i(TAG, "Found Shortcut Parameter in data, passing on: " + shortcutParam);
+ 			setShortcutParam(shortcutParam);
+@@ -1009,6 +1015,10 @@
+ 	protected void onDestroy() {
+ 		super.onDestroy();
+ 		lifeCycle.onDestroy();
++		if (launcherMusic != null) {
++			launcherMusic.release();
++			launcherMusic = null;
++		}
+ 
+ 		// In launcher mode, closing the game (pause menu "Exit", or backing out) ends the
+ 		// emulator process, so the next launch from the launcher always starts fresh.
+@@ -1075,6 +1085,9 @@
+ 	protected void onPause() {
+ 		super.onPause();
+ 		lifeCycle.onPause();
++		if (launcherMusic != null) {
++			launcherMusic.setForeground(false);
++		}
+ 
+ 		InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
+ 		inputManager.unregisterInputDeviceListener(inputDeviceListener);
+@@ -1102,6 +1115,9 @@
+ 	protected void onResume() {
+ 		super.onResume();
+ 		lifeCycle.onResume();
++		if (launcherMusic != null) {
++			launcherMusic.setForeground(true);
++		}
+ 
+ 		updateSustainedPerformanceMode();
+ 		sizeManager.onResume();
+@@ -1805,6 +1821,10 @@
+ 				NativeApp.audioRecording_Stop();
+ 			}
+ 		} else if (command.equals("set_keep_screen_bright")) {
++			// "on" while the game runs, "off" in the pause menu and other screens.
++			if (launcherMusic != null) {
++				launcherMusic.setRunning(params.equals("on"));
++			}
+ 			Window window = this.getWindow();
+ 			if (params.equals("on")) {
+ 				// Keep the screen bright - very annoying if it goes dark when using tilt or a joystick

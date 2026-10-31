@@ -73,8 +73,10 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 unzip -q "$IKZIP" -d "$WORK/zip"
 cp "$WORK/zip/libmain.so" "$LIBS/"
+IKEMEN_LIBS="$LIBS/libmain.so"
 for lib in libSDL2 libxmp libavformat libavcodec libavutil libswscale libswresample libavfilter; do
 	cp "$WORK/zip/lib/$lib.so" "$LIBS/"
+	IKEMEN_LIBS="$IKEMEN_LIBS $LIBS/$lib.so"
 done
 
 # Engine files from the official APK's assets: the Lua scripts (external/), the common data
@@ -88,6 +90,7 @@ rm -rf "$ASSETS/data/ikemen1" "$ASSETS/external/icons/icon-src"
 cp "$WORK/zip/LICENSES.txt" "$ASSETS/LICENSES.txt"
 echo "$IKEMEN_VERSION" > "$ASSETS/VERSION"
 (cd "$ASSETS" && find external data font -type f | LC_ALL=C sort > files.txt)
-echo "    Ikemen GO: $(du -sh "$LIBS" | cut -f1) of libraries, $(wc -l < "$ASSETS/files.txt") engine files ($(du -sh "$ASSETS" | cut -f1))"
+# shellcheck disable=SC2086 # the list is file paths without spaces
+echo "    Ikemen GO: $(du -ch $IKEMEN_LIBS | tail -1 | cut -f1) of libraries, $(wc -l < "$ASSETS/files.txt") engine files ($(du -sh "$ASSETS" | cut -f1))"
 
 echo "==> Engines ready in $LIBS and $ASSETS"

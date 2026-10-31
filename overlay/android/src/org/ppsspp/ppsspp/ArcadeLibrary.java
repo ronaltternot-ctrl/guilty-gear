@@ -1,9 +1,7 @@
 package org.ppsspp.ppsspp;
 
 import android.content.Context;
-import android.database.Cursor;
 import android.net.Uri;
-import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -118,24 +116,16 @@ final class ArcadeLibrary {
 			if (e == null) {
 				throw new IOException("No se encontró " + entryName);
 			}
+			FileOps.requireSpace(romDir(c), e.getSize());
 			try (InputStream in = z.getInputStream(e); OutputStream os = new FileOutputStream(tmp)) {
-				byte[] buf = new byte[1 << 16];
-				int n;
-				while ((n = in.read(buf)) > 0) {
-					os.write(buf, 0, n);
-				}
+				FileOps.copy(in, os, null);
 			}
-		} catch (IOException e) {
+		} catch (IOException | RuntimeException e) {
 			//noinspection ResultOfMethodCallIgnored
 			tmp.delete();
-			throw e;
+			throw FileOps.friendly(e);
 		}
-		if (dest.exists() && !dest.delete()) {
-			throw new IOException("No se pudo reemplazar " + dest.getName());
-		}
-		if (!tmp.renameTo(dest)) {
-			throw new IOException("No se pudo guardar " + dest.getName());
-		}
+		FileOps.replace(tmp, dest);
 		return dest;
 	}
 
@@ -175,6 +165,21 @@ final class ArcadeLibrary {
 		return false;
 	}
 
+	/**
+	 * Capcom's fighting games with three punches and three kicks (Street Fighter, Marvel vs.
+	 * Capcom, Darkstalkers…): FBNeo puts them on the RetroPad Street Fighter style.
+	 */
+	static boolean looksSixButton(String set) {
+		String[] prefixes = { "sf2", "sfa", "sfz", "sfiii", "ssf2", "hsf2", "sfex", "xmcota", "xmvsf", "mvsc", "msh", "vsav", "vhunt",
+			"dstlk", "nwarr", "vampj", "cybots", "ringdest" };
+		for (String p : prefixes) {
+			if (set.startsWith(p)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** FBNeo's set names are short, lower case, letters, digits and _ (kof2002, kf2k2mp). */
 	static boolean looksLikeSetName(String set) {
 		return set.matches("[a-z0-9_]{1,20}");
@@ -186,18 +191,7 @@ final class ArcadeLibrary {
 	}
 
 	static String displayName(Context c, Uri uri) {
-		try (Cursor cursor = c.getContentResolver().query(uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
-			if (cursor != null && cursor.moveToFirst()) {
-				String name = cursor.getString(0);
-				if (name != null) {
-					return name;
-				}
-			}
-		} catch (RuntimeException ignored) {
-			// Fall back to the path below.
-		}
-		String last = uri.getLastPathSegment();
-		return last == null ? "" : last;
+		return FileOps.describe(c, uri).name;
 	}
 
 	/** Copies one zip into the ROM folder (replacing an older copy). Returns the file. */
@@ -208,30 +202,9 @@ final class ArcadeLibrary {
 		}
 		String clean = fileName.replace('/', '_').replace('\\', '_');
 		// FBNeo matches the set name in lower case.
-		int dot = clean.lastIndexOf('.');
-		String out = dot > 0 ? clean.substring(0, dot).toLowerCase(Locale.ROOT) + clean.substring(dot).toLowerCase(Locale.ROOT) : clean.toLowerCase(Locale.ROOT);
-		File dest = new File(dir, out);
-		File tmp = new File(dir, out + ".part");
-		try (InputStream in = c.getContentResolver().openInputStream(uri); OutputStream os = new FileOutputStream(tmp)) {
-			if (in == null) {
-				throw new IOException("No se pudo abrir " + fileName);
-			}
-			byte[] buf = new byte[1 << 16];
-			int n;
-			while ((n = in.read(buf)) > 0) {
-				os.write(buf, 0, n);
-			}
-		} catch (IOException e) {
-			//noinspection ResultOfMethodCallIgnored
-			tmp.delete();
-			throw e;
-		}
-		if (dest.exists() && !dest.delete()) {
-			throw new IOException("No se pudo reemplazar " + dest.getName());
-		}
-		if (!tmp.renameTo(dest)) {
-			throw new IOException("No se pudo guardar " + dest.getName());
-		}
+		File dest = new File(dir, clean.toLowerCase(Locale.ROOT));
+		FileOps.requireSpace(dir, FileOps.describe(c, uri).size);
+		FileOps.copyUri(c, uri, dest, null);
 		return dest;
 	}
 }

@@ -1,9 +1,7 @@
 package org.ppsspp.ppsspp;
 
 import android.content.Context;
-import android.database.Cursor;
 import android.net.Uri;
-import android.provider.OpenableColumns;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -110,20 +108,8 @@ final class PsxLibrary {
 	}
 
 	private static Picked describe(Context c, Uri u) {
-		String name = null;
-		long size = -1;
-		try (Cursor cur = c.getContentResolver().query(u, new String[] { OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE }, null, null, null)) {
-			if (cur != null && cur.moveToFirst()) {
-				name = cur.getString(0);
-				size = cur.isNull(1) ? -1 : cur.getLong(1);
-			}
-		} catch (RuntimeException ignored) {
-			// Fall back below.
-		}
-		if (name == null) {
-			name = u.getLastPathSegment() == null ? "juego" : u.getLastPathSegment();
-		}
-		return new Picked(u, name.replace('/', '_'), size);
+		FileOps.Picked p = FileOps.describe(c, u);
+		return new Picked(u, p.name, p.size);
 	}
 
 	private static File newGameDir(Context c, String name) throws IOException {
@@ -146,23 +132,8 @@ final class PsxLibrary {
 	}
 
 	private static void copy(Context c, Picked p, File dest, Progress progress) throws IOException {
-		try (InputStream in = c.getContentResolver().openInputStream(p.uri); OutputStream os = new FileOutputStream(dest)) {
-			if (in == null) {
-				throw new IOException("No se pudo abrir " + p.name);
-			}
-			byte[] buf = new byte[1 << 17];
-			long done = 0;
-			long last = 0;
-			int n;
-			while ((n = in.read(buf)) > 0) {
-				os.write(buf, 0, n);
-				done += n;
-				if (progress != null && done - last > (8 << 20)) {
-					last = done;
-					progress.onProgress(p.name, done, p.size);
-				}
-			}
-		}
+		FileOps.requireSpace(dest.getParentFile(), p.size);
+		FileOps.copyUri(c, p.uri, dest, progress == null ? null : done -> progress.onProgress(p.name, done, p.size));
 	}
 
 	/** The files a .cue names (FILE "x.bin" BINARY). */
@@ -225,7 +196,7 @@ final class PsxLibrary {
 					copy(c, p, new File(sys, p.name.toLowerCase(Locale.ROOT)), progress);
 					r.bios.add(p.name);
 				} catch (IOException e) {
-					r.problems.add(p.name + ": " + e.getMessage());
+					r.problems.add(p.name + ": " + FileOps.friendly(e).getMessage());
 				}
 			}
 		}
@@ -265,7 +236,7 @@ final class PsxLibrary {
 			} catch (IOException | RuntimeException e) {
 				Log.w(TAG, "cue " + p.name, e);
 				MugenInstaller.deleteTree(dir);
-				r.problems.add(p.name + ": " + e.getMessage());
+				r.problems.add(p.name + ": " + FileOps.friendly(e).getMessage());
 			}
 		}
 		// Archives, single-file images and lone .bin files
@@ -278,6 +249,8 @@ final class PsxLibrary {
 			File dir = null;
 			try {
 				if (x.equals("zip") || x.equals("7z")) {
+					// At least the archive's size (games come out bigger).
+					FileOps.requireSpace(gamesDir(c), p.size);
 					dir = newGameDir(c, p.name);
 					if (x.equals("zip")) {
 						unzip(c, p.uri, dir, progress);
@@ -313,7 +286,7 @@ final class PsxLibrary {
 			} catch (IOException | RuntimeException e) {
 				Log.w(TAG, "import " + p.name, e);
 				MugenInstaller.deleteTree(dir);
-				r.problems.add(p.name + ": " + e.getMessage());
+				r.problems.add(p.name + ": " + FileOps.friendly(e).getMessage());
 			}
 		}
 		return r;

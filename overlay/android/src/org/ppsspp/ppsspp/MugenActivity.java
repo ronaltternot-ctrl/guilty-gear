@@ -38,6 +38,9 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 	private SharedPreferences prefs;
 	private boolean engineStarted;
 	private boolean menuOpen;
+	/** The player's songs instead of the game's music (null: the game keeps its own). */
+	private MusicPlayer music;
+	private boolean muteAllSound;
 	private int dirX, dirY;
 
 	@Override
@@ -45,6 +48,8 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 		prefs = getSharedPreferences("mugen", MODE_PRIVATE);
 		String title = getIntent().getStringExtra(EXTRA_TITLE);
 		GameRun.begin(this, ":mugen", title == null ? "MUGEN" : title, getIntent().getStringExtra(EXTRA_PATH));
+		music = MusicPlayer.create(this, MusicPlayer.MUGEN);
+		muteAllSound = music != null && MusicPlayer.mutesAllSound(this, MusicPlayer.MUGEN);
 		super.onCreate(savedInstanceState);
 	}
 
@@ -62,7 +67,8 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 	protected void prepareGame(File baseDir) throws Exception {
 		GameRun.step(this, "preparando la carpeta del juego");
 		MugenInstaller.installEngine(this, baseDir);
-		MugenInstaller.writeConfig(baseDir);
+		// With the player's music: the game's BGM off (and its effects, if asked).
+		MugenInstaller.writeConfig(baseDir, music != null, muteAllSound);
 		GameRun.step(this, "arrancando Ikemen GO");
 	}
 
@@ -78,6 +84,42 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 	protected void onEngineStarted() {
 		engineStarted = true;
 		GameRun.step(this, GameRun.STEP_PLAYING);
+		if (music != null) {
+			music.setRunning(true);
+		}
+	}
+
+	@Override
+	protected void onResume() {
+		super.onResume();
+		if (music != null) {
+			music.setForeground(true);
+		}
+	}
+
+	@Override
+	protected void onPause() {
+		if (music != null) {
+			music.setForeground(false);
+		}
+		super.onPause();
+	}
+
+	@Override
+	protected void onDestroy() {
+		if (music != null) {
+			music.release();
+			music = null;
+		}
+		super.onDestroy();
+	}
+
+	/** The menu is open (music paused) or closed. */
+	private void setMenuOpen(boolean open) {
+		menuOpen = open;
+		if (music != null) {
+			music.setRunning(!open && engineStarted);
+		}
 	}
 
 	private void applyPadSettings() {
@@ -167,7 +209,7 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 		if (menuOpen) {
 			return;
 		}
-		menuOpen = true;
+		setMenuOpen(true);
 		if (pad != null) {
 			pad.releaseAll();
 		}
@@ -186,7 +228,7 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 		new AlertDialog.Builder(this)
 			.setTitle(getIntent().getStringExtra(EXTRA_TITLE) == null ? "MUGEN" : getIntent().getStringExtra(EXTRA_TITLE))
 			.setItems(items, (d, which) -> {
-				menuOpen = false;
+				setMenuOpen(false);
 				switch (which) {
 					case 0:
 						if (engineStarted) {
@@ -221,12 +263,16 @@ public class MugenActivity extends SDLActivity implements TouchPadView.Listener 
 						break;
 				}
 			})
-			.setOnCancelListener(d -> menuOpen = false)
+			.setOnCancelListener(d -> setMenuOpen(false))
 			.show();
 	}
 
 	private void quit() {
 		GameRun.end(this);
+		if (music != null) {
+			music.release();
+			music = null;
+		}
 		finish();
 		// SDLActivity.onDestroy ends this process (":mugen"); make sure even if the engine hangs.
 		new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(

@@ -74,6 +74,7 @@ public class LauncherActivity extends Activity {
 	private static final int REQUEST_ADD_MUGEN_FOLDER = 4204;
 	private static final int REQUEST_ADD_MUGEN_ZIP = 4205;
 	private static final int REQUEST_ADD_PSX = 4206;
+	private static final int REQUEST_ADD_MUSIC = 4207;
 
 	private static final String PREFS = "launcher";
 	private static final String K_URI = "game_uri";
@@ -382,6 +383,17 @@ public class LauncherActivity extends Activity {
 	private TextView fsrWarn;
 	private TextView fsrNote;
 	private final List<View> effectRows = new ArrayList<>();
+	private Switch musicSwitch;
+	private LinearLayout musicList;
+	private LinearLayout musicOptions;
+	private Switch musicShuffle;
+	private Switch musicMuteAll;
+	private SeekBar musicVolume;
+	private TextView musicVolumeValue;
+	private TextView musicNote;
+	private final TextView[] musicSystemChips = new TextView[MusicPlayer.SYSTEMS.length];
+	private android.media.MediaPlayer musicPreview;
+	private File musicPreviewFile;
 	private TextView benchSummary;
 	private TextView benchDetail;
 	private TextView benchApply;
@@ -443,8 +455,15 @@ public class LauncherActivity extends Activity {
 	}
 
 	@Override
+	protected void onPause() {
+		stopMusicPreview();
+		super.onPause();
+	}
+
+	@Override
 	protected void onDestroy() {
 		handler.removeCallbacksAndMessages(null);
+		stopMusicPreview();
 		super.onDestroy();
 	}
 
@@ -466,6 +485,12 @@ public class LauncherActivity extends Activity {
 		if (requestCode == REQUEST_ADD_PSX) {
 			if (resultCode == RESULT_OK && data != null) {
 				onPsxAdded(data);
+			}
+			return;
+		}
+		if (requestCode == REQUEST_ADD_MUSIC) {
+			if (resultCode == RESULT_OK && data != null) {
+				onMusicAdded(data);
 			}
 			return;
 		}
@@ -845,6 +870,9 @@ public class LauncherActivity extends Activity {
 			.append("Sprites = ").append(fsrSprites() ? "True" : "False").append('\n')
 			.append(String.format(Locale.ROOT, "Detail = %.2f\n", fsrDetail() / 100f))
 			.append(String.format(Locale.ROOT, "Color = %.2f\n", fsrColor() / 100f));
+		// The player's songs replace the game's music (MusicPlayer; UI/AcPlusMusic.h): 1 the music, 2 all sound.
+		ini.append("[Music]\n")
+			.append("MuteGameMusic = ").append(MusicPlayer.pspMuteMode(this)).append('\n');
 		ini.append("[Gestures]\n")
 			.append("Enabled = ").append(prefs.getBoolean(K_GESTURES, false) ? "True" : "False").append('\n')
 			.append("Scale = ").append(prefs.getInt(K_GES_SCALE, 100)).append('\n')
@@ -1307,6 +1335,7 @@ public class LauncherActivity extends Activity {
 		refreshFsr();
 		refreshBenchmark();
 		refreshHud();
+		refreshMusic();
 		touchSwitch.setChecked(prefs.getBoolean(K_TOUCH, true));
 		fpsSwitch.setChecked(prefs.getBoolean(K_FPS, false));
 		refreshRunning();
@@ -1581,7 +1610,7 @@ public class LauncherActivity extends Activity {
 		{ "Street Fighter Alpha 3 MAX", "ULUS-10062 · ULES-00235 · ULJM-05082 (Zero 3 Double Upper)",
 			"Botones arcade de 6 (LP MP HP / LK MK HK), gestos (cadena LP → MP → HP, V-ISM y Alpha Counter), HUD propio (vida, súper, guardia y tiempo), efectos y FSR. Sin perfiles por personaje por ahora." },
 		{ "The King of Fighters 2002 (Arcade / Neo Geo)", "kof2002.zip + neogeo.zip · también Magic Plus, Plus y otros juegos de FBNeo",
-			"Emulador FBNeo con controles táctiles A B C D y atajos AB, CD, BC y ABC, flechas o joystick, estados guardados, filtros de imagen y modo MVS (arcade) o AES (consola). Las versiones hack necesitan también kof2002.zip." },
+			"Emulador FBNeo con controles táctiles A B C D y atajos AB, CD, BC y ABC (6 botones LP MP HP / LK MK HK en los juegos de pelea de Capcom), flechas o joystick, estados guardados, filtros de imagen y modo MVS (arcade) o AES (consola). Las versiones hack necesitan también kof2002.zip." },
 		{ "PlayStation 1", ".cue + .bin · .chd · .pbp · .iso · .zip · .7z · BIOS opcional (scph1001.bin…)",
 			"Emulador PCSX ReARMed con controles táctiles de PlayStation (△ ○ ✕ □, L1 L2 R1 R2, Select y Start), flechas o joystick, tarjeta de memoria, estados guardados, filtros de imagen y resolución doble. KOF '95–'99, Tekken 3, Street Fighter Alpha 3 y más." },
 		{ "Juegos MUGEN (KOF 2012 fan made y otros)", "Carpeta o .zip del juego · motor Ikemen GO 1.0",
@@ -2220,18 +2249,7 @@ public class LauncherActivity extends Activity {
 
 	/** «+ Arcade / Neo Geo»: copies each ZIP into the app; games go to the catalog, BIOS sets stay next to them. */
 	private void onArcadeAdded(Intent data) {
-		final List<Uri> uris = new ArrayList<>();
-		ClipData clip = data.getClipData();
-		if (clip != null) {
-			for (int i = 0; i < clip.getItemCount(); i++) {
-				Uri u = clip.getItemAt(i).getUri();
-				if (u != null) {
-					uris.add(u);
-				}
-			}
-		} else if (data.getData() != null) {
-			uris.add(data.getData());
-		}
+		final List<Uri> uris = FileOps.uris(data);
 		if (uris.isEmpty()) {
 			return;
 		}
@@ -2371,18 +2389,7 @@ public class LauncherActivity extends Activity {
 
 	/** «+ PlayStation 1»: copies each game into its own folder (and BIOS files to the emulator's). */
 	private void onPsxAdded(Intent data) {
-		final List<Uri> uris = new ArrayList<>();
-		ClipData clip = data.getClipData();
-		if (clip != null) {
-			for (int i = 0; i < clip.getItemCount(); i++) {
-				Uri u = clip.getItemAt(i).getUri();
-				if (u != null) {
-					uris.add(u);
-				}
-			}
-		} else if (data.getData() != null) {
-			uris.add(data.getData());
-		}
+		final List<Uri> uris = FileOps.uris(data);
 		if (uris.isEmpty()) {
 			return;
 		}
@@ -2433,6 +2440,373 @@ public class LauncherActivity extends Activity {
 				}
 			});
 		}, "PsxAdd").start();
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// «TU MÚSICA»: the player's songs instead of the games' music (MusicPlayer)
+
+	private boolean refreshingMusic;
+
+	private void buildMusicSection(LinearLayout col) {
+		LinearLayout music = section(col, "TU MÚSICA");
+		musicSwitch = switchRow(music, "Usar mi música en los juegos", "La música del juego se apaga y suenan tus canciones mientras juegas.");
+		musicSwitch.setOnCheckedChangeListener((b, checked) -> {
+			if (refreshingMusic) {
+				return;
+			}
+			MusicPlayer.Settings s = MusicPlayer.load(this);
+			s.enabled = checked;
+			MusicPlayer.save(this, s);
+			refreshMusic();
+		});
+		TextView add = filledButton("+ Subir canciones", 15);
+		add.setOnClickListener(v -> pickMusic());
+		LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		addLp.topMargin = dp(14);
+		music.addView(add, addLp);
+		musicList = new LinearLayout(this);
+		musicList.setOrientation(LinearLayout.VERTICAL);
+		musicList.setPadding(0, dp(10), 0, 0);
+		music.addView(musicList);
+
+		musicOptions = new LinearLayout(this);
+		musicOptions.setOrientation(LinearLayout.VERTICAL);
+		music.addView(musicOptions);
+		musicShuffle = switchRow(musicOptions, "Orden aleatorio", "Apagado: suenan en el orden en que las subiste, y cada partida sigue con la siguiente.");
+		((View) musicShuffle.getParent()).setPadding(0, dp(14), 0, 0);
+		musicShuffle.setOnCheckedChangeListener((b, checked) -> {
+			if (!refreshingMusic) {
+				MusicPlayer.Settings s = MusicPlayer.load(this);
+				s.shuffle = checked;
+				MusicPlayer.save(this, s);
+			}
+		});
+
+		LinearLayout volRow = new LinearLayout(this);
+		volRow.setOrientation(LinearLayout.HORIZONTAL);
+		volRow.setPadding(0, dp(16), 0, 0);
+		volRow.addView(text("Volumen de tu música", 15, C_TEXT, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		musicVolumeValue = text("", 15, C_ACCENT, true);
+		volRow.addView(musicVolumeValue);
+		musicOptions.addView(volRow);
+		musicVolume = new SeekBar(this);
+		musicVolume.setMax(100);
+		musicVolume.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
+		musicVolume.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
+		musicVolume.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF4A4A55));
+		musicVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+			@Override
+			public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+				musicVolumeValue.setText(progress + " %");
+				if (fromUser && musicPreview != null) {
+					float v = (progress / 100f) * (progress / 100f);
+					try {
+						musicPreview.setVolume(v, v);
+					} catch (IllegalStateException ignored) {
+						// Preview ending.
+					}
+				}
+			}
+
+			@Override
+			public void onStartTrackingTouch(SeekBar bar) {}
+
+			@Override
+			public void onStopTrackingTouch(SeekBar bar) {
+				MusicPlayer.Settings s = MusicPlayer.load(LauncherActivity.this);
+				s.volume = bar.getProgress();
+				MusicPlayer.save(LauncherActivity.this, s);
+			}
+		});
+		LinearLayout.LayoutParams volLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		volLp.topMargin = dp(6);
+		musicOptions.addView(musicVolume, volLp);
+		musicOptions.addView(text("Toca una canción para escucharla con este volumen. El volumen general es el del teléfono.", 12, C_MUTED, false));
+
+		TextView where = text("En qué juegos", 15, C_TEXT, true);
+		where.setPadding(0, dp(16), 0, 0);
+		musicOptions.addView(where);
+		LinearLayout chips = new LinearLayout(this);
+		chips.setOrientation(LinearLayout.HORIZONTAL);
+		chips.setPadding(0, dp(10), 0, 0);
+		for (int i = 0; i < MusicPlayer.SYSTEMS.length; i++) {
+			final String sys = MusicPlayer.SYSTEMS[i];
+			TextView chip = chip(MusicPlayer.SYSTEM_NAMES[i]);
+			chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+			chip.setOnClickListener(v -> {
+				MusicPlayer.Settings s = MusicPlayer.load(this);
+				if (!s.off.remove(sys)) {
+					s.off.add(sys);
+				}
+				MusicPlayer.save(this, s);
+				refreshMusic();
+			});
+			musicSystemChips[i] = chip;
+			chips.addView(chip, weighted(i == 0 ? 0 : dp(3), i == MusicPlayer.SYSTEMS.length - 1 ? 0 : dp(3)));
+		}
+		musicOptions.addView(chips);
+
+		musicMuteAll = switchRow(musicOptions, "Quitar también efectos y voces", "Silencio total del juego: solo se oye tu música.");
+		((View) musicMuteAll.getParent()).setPadding(0, dp(16), 0, 0);
+		musicMuteAll.setOnCheckedChangeListener((b, checked) -> {
+			if (!refreshingMusic) {
+				MusicPlayer.Settings s = MusicPlayer.load(this);
+				s.muteAll = checked;
+				MusicPlayer.save(this, s);
+				refreshMusic();
+			}
+		});
+		musicNote = text("", 12, C_MUTED, false);
+		musicNote.setPadding(0, dp(14), 0, 0);
+		music.addView(musicNote);
+	}
+
+	private void refreshMusic() {
+		if (musicSwitch == null) {
+			return;
+		}
+		refreshingMusic = true;
+		MusicPlayer.Settings s = MusicPlayer.load(this);
+		List<File> tracks = MusicPlayer.tracks(this);
+		musicSwitch.setChecked(s.enabled);
+		musicShuffle.setChecked(s.shuffle);
+		musicMuteAll.setChecked(s.muteAll);
+		musicVolume.setProgress(s.volume);
+		musicVolumeValue.setText(s.volume + " %");
+		for (int i = 0; i < MusicPlayer.SYSTEMS.length; i++) {
+			styleChip(musicSystemChips[i], !s.off.contains(MusicPlayer.SYSTEMS[i]));
+		}
+		musicList.removeAllViews();
+		if (tracks.isEmpty()) {
+			musicList.addView(text("Todavía no subiste canciones. Sirven MP3, M4A, OGG, FLAC, WAV y MIDI, y puedes elegir varias a la vez.", 13, C_MUTED, false));
+		} else {
+			java.util.Properties lengths = MusicPlayer.durations(this);
+			long bytes = 0;
+			long ms = 0;
+			for (File f : tracks) {
+				long len = parseLong(lengths.getProperty(f.getName()));
+				bytes += f.length();
+				ms += Math.max(0, len);
+				musicList.addView(musicRow(f, len));
+			}
+			TextView total = text((tracks.size() == 1 ? "1 canción" : tracks.size() + " canciones")
+				+ (ms > 0 ? " · " + MusicPlayer.formatDuration(ms) : "") + " · " + FileOps.mb(bytes), 12, C_MUTED, false);
+			total.setPadding(0, dp(6), 0, 0);
+			musicList.addView(total);
+		}
+		musicOptions.setVisibility(tracks.isEmpty() ? View.GONE : View.VISIBLE);
+		musicNote.setText(musicNoteText(s, tracks.isEmpty()));
+		refreshingMusic = false;
+	}
+
+	private static long parseLong(String s) {
+		try {
+			return s == null ? -1 : Long.parseLong(s.trim());
+		} catch (NumberFormatException e) {
+			return -1;
+		}
+	}
+
+	private String musicNoteText(MusicPlayer.Settings s, boolean empty) {
+		if (empty) {
+			return "Las canciones se copian a la app: puedes borrarlas del teléfono después.";
+		}
+		if (!s.enabled) {
+			return "Apagado: cada juego suena con su propia música.";
+		}
+		StringBuilder b = new StringBuilder();
+		if (s.muteAll) {
+			b.append("Silencio total: en los juegos marcados solo suena tu música.\n");
+		} else {
+			b.append("Cómo se apaga la música de cada juego:\n");
+			if (s.usesIn(MusicPlayer.PSP)) {
+				b.append("• PSP: las pistas de música del juego (ATRAC3 / MP3). En algunos juegos las voces o los videos usan el mismo formato y también se apagan.\n");
+			}
+			if (s.usesIn(MusicPlayer.PSX)) {
+				b.append("• PS1: la música de CD y XA (en algunos juegos también las voces de las escenas). Si un juego hace su música con el chip de sonido, esa sigue sonando.\n");
+			}
+			if (s.usesIn(MusicPlayer.MUGEN)) {
+				b.append("• MUGEN: la música de los escenarios y los menús; golpes y voces siguen.\n");
+			}
+			if (s.usesIn(MusicPlayer.ARCADE)) {
+				b.append("• Arcade / Neo Geo: la música y los golpes salen del mismo chip de sonido, así que se apaga todo el sonido del juego. Para oír los golpes, desmarca «Arcade».\n");
+			}
+		}
+		List<String> own = new ArrayList<>();
+		for (int i = 0; i < MusicPlayer.SYSTEMS.length; i++) {
+			if (s.off.contains(MusicPlayer.SYSTEMS[i])) {
+				own.add(MusicPlayer.SYSTEM_NAMES[i]);
+			}
+		}
+		if (!own.isEmpty()) {
+			b.append("Con su propia música: ").append(TextUtils.join(", ", own)).append(".\n");
+		}
+		b.append("Se pausa con el menú del juego. Los cambios se aplican la próxima vez que abras un juego.");
+		return b.toString();
+	}
+
+	private View musicRow(File f, long lengthMs) {
+		boolean playing = f.equals(musicPreviewFile);
+		LinearLayout row = new LinearLayout(this);
+		row.setOrientation(LinearLayout.HORIZONTAL);
+		row.setGravity(Gravity.CENTER_VERTICAL);
+		row.setPadding(dp(4), dp(2), 0, dp(2));
+		row.setBackground(ripple(Color.TRANSPARENT, 0, 10));
+		makeClickable(row);
+		row.setOnClickListener(v -> toggleMusicPreview(f));
+		TextView icon = text(playing ? "■" : "▶", 13, playing ? C_ACCENT : C_MUTED, true);
+		row.addView(icon, new LinearLayout.LayoutParams(dp(26), ViewGroup.LayoutParams.WRAP_CONTENT));
+		TextView name = text(MusicPlayer.title(f), 14, playing ? C_ACCENT : C_TEXT, false);
+		name.setSingleLine(true);
+		name.setEllipsize(TextUtils.TruncateAt.END);
+		row.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+		TextView len = text(MusicPlayer.formatDuration(lengthMs), 12, C_MUTED, false);
+		len.setPadding(dp(8), 0, dp(4), 0);
+		row.addView(len);
+		TextView del = text("✕", 16, C_MUTED, true);
+		del.setGravity(Gravity.CENTER);
+		del.setPadding(dp(12), dp(10), dp(12), dp(10));
+		del.setContentDescription("Quitar " + MusicPlayer.title(f));
+		makeClickable(del);
+		del.setOnClickListener(v -> confirmRemoveTrack(f));
+		row.addView(del);
+		return row;
+	}
+
+	private void pickMusic() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		// Some file managers call .ogg and .flac files application/*.
+		intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "audio/*", "application/ogg", "application/x-flac", "application/x-ogg" });
+		intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+		try {
+			startActivityForResult(intent, REQUEST_ADD_MUSIC);
+			Toast.makeText(this, "Mantén pulsada una canción para elegir varias.", Toast.LENGTH_LONG).show();
+		} catch (ActivityNotFoundException ex) {
+			showMessage("Sin selector de archivos", "Tu teléfono no tiene un selector de archivos disponible.");
+		}
+	}
+
+	private void onMusicAdded(Intent data) {
+		final List<Uri> uris = FileOps.uris(data);
+		if (uris.isEmpty()) {
+			return;
+		}
+		final boolean first = MusicPlayer.tracks(this).isEmpty();
+		final android.app.ProgressDialog pd = progressDialog("Subiendo tu música");
+		final android.content.Context app = getApplicationContext();
+		new Thread(() -> {
+			int ok = 0;
+			final List<String> problems = new ArrayList<>();
+			for (int i = 0; i < uris.size(); i++) {
+				Uri u = uris.get(i);
+				String name = FileOps.describe(app, u).name;
+				final String msg = uris.size() > 1 ? String.format(Locale.ROOT, "%s\n%d de %d", name, i + 1, uris.size()) : name;
+				handler.post(() -> pd.setMessage(msg));
+				try {
+					MusicPlayer.addTrack(app, u);
+					ok++;
+				} catch (IOException | RuntimeException e) {
+					Log.w(TAG, "Music " + name, e);
+					problems.add(name + ": " + e.getMessage());
+				}
+			}
+			final int added = ok;
+			handler.post(() -> {
+				doneProgress(pd);
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				MusicPlayer.Settings s = MusicPlayer.load(this);
+				if (added > 0 && first && !s.enabled) {
+					// The first songs turn it on: that's what the player uploads them for.
+					s.enabled = true;
+					MusicPlayer.save(this, s);
+				}
+				refreshMusic();
+				StringBuilder m = new StringBuilder();
+				if (added > 0) {
+					m.append(added == 1 ? "Se subió 1 canción." : "Se subieron " + added + " canciones.");
+					if (s.enabled) {
+						m.append(" Desde la próxima partida suenan en los juegos en vez de su música.");
+					} else {
+						m.append(" Activa «Usar mi música en los juegos» para oírlas al jugar.");
+					}
+				}
+				if (!problems.isEmpty()) {
+					m.append(m.length() > 0 ? "\n\n" : "").append("No se subieron:\n").append(TextUtils.join("\n", problems));
+				}
+				showMessage("Tu música", m.toString());
+			});
+		}, "MusicAdd").start();
+	}
+
+	private void confirmRemoveTrack(File f) {
+		new AlertDialog.Builder(this)
+			.setTitle("Quitar canción")
+			.setMessage("¿Quitar «" + MusicPlayer.title(f) + "» de tu música?")
+			.setNegativeButton("Cancelar", null)
+			.setPositiveButton("Quitar", (d, w) -> {
+				if (f.equals(musicPreviewFile)) {
+					stopMusicPreview();
+				}
+				MusicPlayer.removeTrack(this, f);
+				refreshMusic();
+			})
+			.show();
+	}
+
+	private void toggleMusicPreview(File f) {
+		boolean same = f.equals(musicPreviewFile);
+		stopMusicPreview();
+		if (!same) {
+			final android.media.MediaPlayer mp = new android.media.MediaPlayer();
+			try {
+				mp.setDataSource(f.getPath());
+				mp.setOnPreparedListener(p -> {
+					if (p == musicPreview) {
+						float v = (musicVolume.getProgress() / 100f) * (musicVolume.getProgress() / 100f);
+						p.setVolume(v, v);
+						p.start();
+					}
+				});
+				mp.setOnCompletionListener(p -> {
+					if (p == musicPreview) {
+						stopMusicPreview();
+						refreshMusic();
+					}
+				});
+				mp.setOnErrorListener((p, what, extra) -> {
+					if (p == musicPreview) {
+						stopMusicPreview();
+						refreshMusic();
+						Toast.makeText(this, "No se pudo reproducir esta canción", Toast.LENGTH_SHORT).show();
+					}
+					return true;
+				});
+				musicPreview = mp;
+				musicPreviewFile = f;
+				mp.prepareAsync();
+			} catch (IOException | RuntimeException e) {
+				Log.w(TAG, "Preview " + f, e);
+				stopMusicPreview();
+				Toast.makeText(this, "No se pudo reproducir esta canción", Toast.LENGTH_SHORT).show();
+			}
+		}
+		refreshMusic();
+	}
+
+	private void stopMusicPreview() {
+		if (musicPreview != null) {
+			try {
+				musicPreview.release();
+			} catch (RuntimeException ignored) {
+				// Already released.
+			}
+		}
+		musicPreview = null;
+		musicPreviewFile = null;
 	}
 
 	private void pickMugen() {
@@ -2577,18 +2951,7 @@ public class LauncherActivity extends Activity {
 
 	/** «Añadir juegos»: reads every file chosen (name, disc id, title, icon) and adds it. */
 	private void onGamesAdded(Intent data) {
-		final List<Uri> uris = new ArrayList<>();
-		ClipData clip = data.getClipData();
-		if (clip != null) {
-			for (int i = 0; i < clip.getItemCount(); i++) {
-				Uri u = clip.getItemAt(i).getUri();
-				if (u != null) {
-					uris.add(u);
-				}
-			}
-		} else if (data.getData() != null) {
-			uris.add(data.getData());
-		}
+		final List<Uri> uris = FileOps.uris(data);
 		if (uris.isEmpty()) {
 			return;
 		}
@@ -3976,6 +4339,8 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams pickLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		pickLp.topMargin = dp(8);
 		game.addView(pick, pickLp);
+
+		buildMusicSection(col);
 
 		// Device test (DeviceBenchmark)
 		LinearLayout bench = section(col, "TU EQUIPO");

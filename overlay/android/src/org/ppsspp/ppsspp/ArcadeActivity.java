@@ -74,6 +74,13 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 
 	private static final int C_A = 0xFFFF5A4E, C_B = 0xFFFFB547, C_C = 0xFF4CD07D, C_D = 0xFF4DA3FF, C_SHORT = 0xFFB9B9C6;
 
+	// Capcom's six-button games (FBNeo's Street Fighter layout on the classic RetroPad):
+	// punches Y, X, L and kicks B, A, R; all three punches L2, all three kicks R2.
+	private static final int KEY_LP = KeyEvent.KEYCODE_BUTTON_Y, KEY_MP = KeyEvent.KEYCODE_BUTTON_X, KEY_HP = KeyEvent.KEYCODE_BUTTON_L1;
+	private static final int KEY_LK = KeyEvent.KEYCODE_BUTTON_B, KEY_MK = KeyEvent.KEYCODE_BUTTON_A, KEY_HK = KeyEvent.KEYCODE_BUTTON_R1;
+	private static final int KEY_3P = KeyEvent.KEYCODE_BUTTON_L2, KEY_3K = KeyEvent.KEYCODE_BUTTON_R2;
+	private static final int C_PUNCH = 0xFFFF6B5A, C_KICK = 0xFF55A8FF;
+
 	static final String[] SHADERS = { "sharp", "cut", "crt", "lcd", "none" };
 	static final String[] SHADER_NAMES = { "Nítida (píxeles limpios)", "Suavizada (bordes redondeados)", "CRT (televisor)", "LCD", "Original" };
 
@@ -85,7 +92,13 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private File rom, saves, states;
 	private String set, title;
 	private boolean psx;
+	/** An arcade set of SNK's Neo Geo (four buttons, MVS / AES). */
+	private boolean neoGeo;
 	private boolean started, failed, menuOpen, paused;
+	/** The player's songs instead of the game's music (null: the game keeps its own). */
+	private MusicPlayer music;
+	/** The game's own sound stays off: arcade boards mix music and effects, or the player asked. */
+	private boolean muteGame;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -111,6 +124,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			title = psx ? PsxLibrary.title(rom.getName()) : ArcadeCheck.title(this, set);
 		}
 		GameRun.begin(this, ":arcade", title, rom.getName() + " (" + (rom.length() / 1048576) + " MB)");
+		neoGeo = !psx && (ArcadeCheck.info(this, set) != null || ArcadeLibrary.looksNeoGeo(set));
+		String musicSystem = psx ? MusicPlayer.PSX : MusicPlayer.ARCADE;
+		music = MusicPlayer.create(this, musicSystem);
+		muteGame = music != null && MusicPlayer.mutesAllSound(this, musicSystem);
 		File base = new File(getFilesDir(), psx ? "psx" : "arcade");
 		File system = new File(base, "system");
 		saves = new File(base, "saves");
@@ -175,6 +192,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 				new Variable("pcsx_rearmed_bios", "auto", null),
 				new Variable("pcsx_rearmed_drc", "enabled", null),
 				new Variable("pcsx_rearmed_neon_enhancement_enable", prefs.getBoolean("hires", false) ? "enabled" : "disabled", null),
+				// The player's music instead of the game's: no CD audio, no XA (where PS1 games keep their music).
+				new Variable("pcsx_rearmed_nocdaudio", music != null ? "disabled" : "enabled", null),
+				new Variable("pcsx_rearmed_noxadecoding", music != null ? "disabled" : "enabled", null),
 			};
 		}
 		boolean aes = "aes".equals(prefs.getString("neogeo_mode", "mvs"));
@@ -227,23 +247,42 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			pad.setVisibility(prefs.getBoolean("hide_pad", false) ? View.GONE : View.VISIBLE);
 			return;
 		}
-		pad.setButtons(
-			new TouchPadView.Spec[] { new TouchPadView.Spec("A", C_A, KEY_A), new TouchPadView.Spec("C", C_C, KEY_C) },
-			new TouchPadView.Spec[] { new TouchPadView.Spec("B", C_B, KEY_B), new TouchPadView.Spec("D", C_D, KEY_D) },
-			new TouchPadView.Spec[] {
-				new TouchPadView.Spec("AB", C_SHORT, KEY_A, KEY_B),
-				new TouchPadView.Spec("CD", C_SHORT, KEY_C, KEY_D),
-				new TouchPadView.Spec("BC", C_SHORT, KEY_B, KEY_C),
-				new TouchPadView.Spec("ABC", C_SHORT, KEY_A, KEY_B, KEY_C),
-			},
-			new TouchPadView.Spec[] {
-				new TouchPadView.Spec("COIN", 0xFFE8E8EE, KEY_COIN),
-				new TouchPadView.Spec("START", 0xFFE8E8EE, KEY_START),
-			});
+		TouchPadView.Spec[] system = {
+			new TouchPadView.Spec("COIN", 0xFFE8E8EE, KEY_COIN),
+			new TouchPadView.Spec("START", 0xFFE8E8EE, KEY_START),
+		};
+		if (sixButtons()) {
+			pad.setButtons(
+				new TouchPadView.Spec[] { new TouchPadView.Spec("LP", C_PUNCH, KEY_LP), new TouchPadView.Spec("MP", C_PUNCH, KEY_MP), new TouchPadView.Spec("HP", C_PUNCH, KEY_HP) },
+				new TouchPadView.Spec[] { new TouchPadView.Spec("LK", C_KICK, KEY_LK), new TouchPadView.Spec("MK", C_KICK, KEY_MK), new TouchPadView.Spec("HK", C_KICK, KEY_HK) },
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("3P", C_SHORT, KEY_3P),
+					new TouchPadView.Spec("3K", C_SHORT, KEY_3K),
+					new TouchPadView.Spec("LP+LK", C_SHORT, KEY_LP, KEY_LK),
+					new TouchPadView.Spec("MP+MK", C_SHORT, KEY_MP, KEY_MK),
+				},
+				system);
+		} else {
+			pad.setButtons(
+				new TouchPadView.Spec[] { new TouchPadView.Spec("A", C_A, KEY_A), new TouchPadView.Spec("C", C_C, KEY_C) },
+				new TouchPadView.Spec[] { new TouchPadView.Spec("B", C_B, KEY_B), new TouchPadView.Spec("D", C_D, KEY_D) },
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("AB", C_SHORT, KEY_A, KEY_B),
+					new TouchPadView.Spec("CD", C_SHORT, KEY_C, KEY_D),
+					new TouchPadView.Spec("BC", C_SHORT, KEY_B, KEY_C),
+					new TouchPadView.Spec("ABC", C_SHORT, KEY_A, KEY_B, KEY_C),
+				},
+				system);
+		}
 		pad.setStick("stick".equals(prefs.getString("move", "dpad")));
 		pad.setSizePercent(prefs.getInt("size", 100));
 		pad.setOpacity(prefs.getFloat("opacity", 0.85f));
 		pad.setVisibility(prefs.getBoolean("hide_pad", false) ? View.GONE : View.VISIBLE);
+	}
+
+	/** Six buttons (Capcom) or four (Neo Geo and the rest), per game; Capcom's fighting games start with six. */
+	private boolean sixButtons() {
+		return !psx && !neoGeo && "six".equals(prefs.getString("buttons_" + set, ArcadeLibrary.looksSixButton(set) ? "six" : "four"));
 	}
 
 	private void onFirstFrame() {
@@ -253,6 +292,24 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		started = true;
 		status.setVisibility(View.GONE);
 		GameRun.step(this, GameRun.STEP_PLAYING);
+		applyGameAudio();
+		if (music != null) {
+			music.setRunning(!menuOpen);
+		}
+	}
+
+	/** The game's own sound: on, or off while paused or replaced by the player's music. */
+	private void applyGameAudio() {
+		if (retro != null) {
+			retro.setAudioEnabled(!paused && !muteGame);
+		}
+	}
+
+	@Override
+	protected void onStart() {
+		super.onStart();
+		// The core is created now (the view's ON_CREATE), and it starts with its sound on.
+		applyGameAudio();
 	}
 
 	private void onRetroError(int code) {
@@ -330,8 +387,11 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private void pauseGame() {
 		if (retro != null && !paused) {
 			paused = true;
-			retro.setAudioEnabled(false);
+			applyGameAudio();
 			retro.onPause();
+		}
+		if (music != null) {
+			music.setRunning(false);
 		}
 	}
 
@@ -339,7 +399,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		if (retro != null && paused) {
 			paused = false;
 			retro.onResume();
-			retro.setAudioEnabled(true);
+			applyGameAudio();
+		}
+		if (music != null) {
+			music.setRunning(started);
 		}
 	}
 
@@ -349,6 +412,11 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 
 	private File sramFile() {
 		return new File(saves, set + ".srm");
+	}
+
+	/** One line of the game's menu. run() returns true when the menu closes after it. */
+	private interface MenuAction {
+		boolean run();
 	}
 
 	private void showMenu() {
@@ -365,6 +433,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		final boolean aes = "aes".equals(prefs.getString("neogeo_mode", "mvs"));
 		final boolean hires = prefs.getBoolean("hires", false);
 		final boolean hidden = prefs.getBoolean("hide_pad", false);
+		final boolean six = sixButtons();
 		String shaderId = prefs.getString("shader", "sharp");
 		String shaderName = SHADER_NAMES[0];
 		for (int i = 0; i < SHADERS.length; i++) {
@@ -372,71 +441,90 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 				shaderName = SHADER_NAMES[i];
 			}
 		}
-		final String[] items = {
-			"▶  Continuar",
-			"💾  Guardar estado",
-			hasState ? "📂  Cargar estado (" + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(state.lastModified())) + ")" : "📂  Cargar estado (no hay)",
-			"🕹  Movimiento: " + (stick ? "joystick" : "flechas"),
-			"🔘  Tamaño de los botones: " + (size < 95 ? "pequeño" : size > 110 ? "grande" : "normal"),
-			"👁  Controles en pantalla: " + (hidden ? "ocultos" : "visibles"),
-			"🖼  Imagen: " + shaderName,
-			psx ? "✨  Resolución: " + (hires ? "doble (más nítida, pide más al teléfono)" : "normal de PS1")
-				: "🎮  Neo Geo: " + (aes ? "AES (consola, sin monedas)" : "MVS (arcade, con monedas)"),
-			"🔄  Reiniciar el juego",
-			"✕  Salir al catálogo",
-		};
+		final java.util.List<String> labels = new java.util.ArrayList<>();
+		final java.util.List<MenuAction> actions = new java.util.ArrayList<>();
+		labels.add("▶  Continuar");
+		actions.add(() -> true);
+		labels.add("💾  Guardar estado");
+		actions.add(() -> {
+			saveState();
+			return true;
+		});
+		labels.add(hasState ? "📂  Cargar estado (" + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(state.lastModified())) + ")" : "📂  Cargar estado (no hay)");
+		actions.add(() -> {
+			if (hasState) {
+				loadState();
+			} else {
+				Toast.makeText(this, "Todavía no guardaste un estado de este juego", Toast.LENGTH_SHORT).show();
+			}
+			return true;
+		});
+		labels.add("🕹  Movimiento: " + (stick ? "joystick" : "flechas"));
+		actions.add(() -> {
+			prefs.edit().putString("move", stick ? "dpad" : "stick").apply();
+			applyPadSettings();
+			return true;
+		});
+		if (!psx && !neoGeo) {
+			labels.add("🔘  Botones: " + (six ? "6 (LP MP HP / LK MK HK, Capcom)" : "4 (A B C D)"));
+			actions.add(() -> {
+				prefs.edit().putString("buttons_" + set, six ? "four" : "six").apply();
+				applyPadSettings();
+				return true;
+			});
+		}
+		labels.add("📏  Tamaño de los botones: " + (size < 95 ? "pequeño" : size > 110 ? "grande" : "normal"));
+		actions.add(() -> {
+			prefs.edit().putInt("size", size < 95 ? 100 : size > 110 ? 85 : 120).apply();
+			applyPadSettings();
+			return true;
+		});
+		labels.add("👁  Controles en pantalla: " + (hidden ? "ocultos" : "visibles"));
+		actions.add(() -> {
+			prefs.edit().putBoolean("hide_pad", !hidden).apply();
+			applyPadSettings();
+			if (!hidden) {
+				Toast.makeText(this, "Para volver a verlos, abre este menú con el botón Atrás", Toast.LENGTH_LONG).show();
+			}
+			return true;
+		});
+		labels.add("🖼  Imagen: " + shaderName);
+		actions.add(() -> {
+			pickShader();
+			return false;
+		});
+		if (psx) {
+			labels.add("✨  Resolución: " + (hires ? "doble (más nítida, pide más al teléfono)" : "normal de PS1"));
+			actions.add(() -> {
+				prefs.edit().putBoolean("hires", !hires).apply();
+				retro.updateVariables(new Variable("pcsx_rearmed_neon_enhancement_enable", !hires ? "enabled" : "disabled", null));
+				Toast.makeText(this, !hires ? "Resolución doble: si va lento, vuelve a la normal" : "Resolución normal", Toast.LENGTH_SHORT).show();
+				return true;
+			});
+		} else if (neoGeo) {
+			labels.add("🎮  Neo Geo: " + (aes ? "AES (consola, sin monedas)" : "MVS (arcade, con monedas)"));
+			actions.add(() -> {
+				prefs.edit().putString("neogeo_mode", aes ? "mvs" : "aes").apply();
+				Toast.makeText(this, "Se aplica la próxima vez que abras el juego", Toast.LENGTH_LONG).show();
+				return true;
+			});
+		}
+		labels.add("🔄  Reiniciar el juego");
+		actions.add(() -> {
+			retro.reset(false);
+			return true;
+		});
+		labels.add("✕  Salir al catálogo");
+		actions.add(() -> {
+			exit(true);
+			return false;
+		});
 		new AlertDialog.Builder(this)
 			.setTitle(title)
-			.setItems(items, (d, which) -> {
-				switch (which) {
-					case 1:
-						saveState();
-						break;
-					case 2:
-						if (hasState) {
-							loadState();
-						} else {
-							Toast.makeText(this, "Todavía no guardaste un estado de este juego", Toast.LENGTH_SHORT).show();
-						}
-						break;
-					case 3:
-						prefs.edit().putString("move", stick ? "dpad" : "stick").apply();
-						applyPadSettings();
-						break;
-					case 4:
-						prefs.edit().putInt("size", size < 95 ? 100 : size > 110 ? 85 : 120).apply();
-						applyPadSettings();
-						break;
-					case 5:
-						prefs.edit().putBoolean("hide_pad", !hidden).apply();
-						applyPadSettings();
-						if (!hidden) {
-							Toast.makeText(this, "Para volver a verlos, abre este menú con el botón Atrás", Toast.LENGTH_LONG).show();
-						}
-						break;
-					case 6:
-						pickShader();
-						return;
-					case 7:
-						if (psx) {
-							prefs.edit().putBoolean("hires", !hires).apply();
-							retro.updateVariables(new Variable("pcsx_rearmed_neon_enhancement_enable", !hires ? "enabled" : "disabled", null));
-							Toast.makeText(this, !hires ? "Resolución doble: si va lento, vuelve a la normal" : "Resolución normal", Toast.LENGTH_SHORT).show();
-						} else {
-							prefs.edit().putString("neogeo_mode", aes ? "mvs" : "aes").apply();
-							Toast.makeText(this, "Se aplica la próxima vez que abras el juego", Toast.LENGTH_LONG).show();
-						}
-						break;
-					case 8:
-						retro.reset(false);
-						break;
-					case 9:
-						exit(true);
-						return;
-					default:
-						break;
+			.setItems(labels.toArray(new String[0]), (d, which) -> {
+				if (actions.get(which).run()) {
+					closeMenu();
 				}
-				closeMenu();
 			})
 			.setOnCancelListener(d -> closeMenu())
 			.show();
@@ -519,6 +607,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			pauseGame();
 			saveSram();
 		}
+		if (music != null) {
+			music.release();
+			music = null;
+		}
 		GameRun.end(this);
 		finish();
 	}
@@ -527,6 +619,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	protected void onPause() {
 		if (pad != null) {
 			pad.releaseAll();
+		}
+		if (music != null) {
+			music.setForeground(false);
 		}
 		super.onPause();
 		if (started && !failed) {
@@ -538,6 +633,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	protected void onResume() {
 		super.onResume();
 		goFullscreen();
+		if (music != null) {
+			music.setForeground(true);
+		}
 		// The view resumes itself with the activity: keep the game paused while the menu is open.
 		handler.post(() -> {
 			if (menuOpen && retro != null) {
@@ -550,6 +648,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	@Override
 	protected void onDestroy() {
 		super.onDestroy();
+		if (music != null) {
+			music.release();
+			music = null;
+		}
 		if (!isFinishing()) {
 			// Android is recreating the screen (it shouldn't, configChanges covers it): keep the
 			// process, the new screen starts the core again.

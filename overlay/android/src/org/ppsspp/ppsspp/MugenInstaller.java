@@ -176,12 +176,14 @@ final class MugenInstaller {
 
 	/** Extracts a .7z into a new folder; returns the game's root folder. */
 	static File import7z(Context c, Uri uri, String name, Progress p) throws IOException {
+		// At least the archive's size (a game comes out bigger).
+		FileOps.requireSpace(gamesDir(c), FileOps.describe(c, uri).size);
 		File dest = freshDir(c, name.replaceAll("(?i)\\.7z$", ""));
 		try {
 			Seven.extract(c, uri, dest, p);
 		} catch (IOException | RuntimeException e) {
 			deleteTree(dest);
-			throw e;
+			throw FileOps.friendly(e);
 		}
 		File root = findRoot(dest);
 		if (root == null) {
@@ -193,15 +195,10 @@ final class MugenInstaller {
 
 	/** Extracts a .zip into a new folder; returns the game's root folder. */
 	static File importZip(Context c, Uri uri, String name, Progress p) throws IOException {
+		// Unknown size (-1): the progress shows the files instead.
+		long total = Math.max(0, FileOps.describe(c, uri).size);
+		FileOps.requireSpace(gamesDir(c), total);
 		File dest = freshDir(c, name);
-		long total = 0;
-		try (Cursor cur = c.getContentResolver().query(uri, new String[] { android.provider.OpenableColumns.SIZE }, null, null, null)) {
-			if (cur != null && cur.moveToFirst() && !cur.isNull(0)) {
-				total = cur.getLong(0);
-			}
-		} catch (RuntimeException ignored) {
-			// Unknown size: the progress shows the files instead.
-		}
 		try {
 			try {
 				unzip(c, uri, dest, StandardCharsets.UTF_8, total, p);
@@ -215,7 +212,7 @@ final class MugenInstaller {
 			}
 		} catch (IOException | RuntimeException e) {
 			deleteTree(dest);
-			throw e;
+			throw FileOps.friendly(e);
 		}
 		File root = findRoot(dest);
 		if (root == null) {
@@ -244,7 +241,6 @@ final class MugenInstaller {
 			};
 			try (ZipInputStream zin = new ZipInputStream(new java.io.BufferedInputStream(counting, 1 << 16), charset)) {
 				ZipEntry e;
-				byte[] buf = new byte[1 << 16];
 				int files = 0;
 				while ((e = zin.getNextEntry()) != null) {
 					String n = e.getName().replace('\\', '/');
@@ -263,10 +259,7 @@ final class MugenInstaller {
 						throw new IOException("No se pudo crear " + parent.getName());
 					}
 					try (OutputStream os = new FileOutputStream(out)) {
-						int k;
-						while ((k = zin.read(buf)) > 0) {
-							os.write(buf, 0, k);
-						}
+						FileOps.copy(zin, os, null);
 					}
 					files++;
 					if (p != null && (files % 20 == 0)) {
@@ -288,7 +281,7 @@ final class MugenInstaller {
 			copyTree(cr, tree, rootId, dest, p, count);
 		} catch (IOException | RuntimeException e) {
 			deleteTree(dest);
-			throw e;
+			throw FileOps.friendly(e);
 		}
 		File root = findRoot(dest);
 		if (root == null) {
@@ -323,7 +316,6 @@ final class MugenInstaller {
 				entries.add(new String[] { cur.getString(0), cur.getString(1), cur.getString(2) });
 			}
 		}
-		byte[] buf = new byte[1 << 16];
 		for (String[] e : entries) {
 			String name = e[1] == null ? "file" : e[1].replace('/', '_');
 			File out = new File(dest, name);
@@ -339,10 +331,7 @@ final class MugenInstaller {
 				if (in == null) {
 					throw new IOException("No se pudo leer " + name);
 				}
-				int k;
-				while ((k = in.read(buf)) > 0) {
-					os.write(buf, 0, k);
-				}
+				FileOps.copy(in, os, null);
 			}
 			count[0]++;
 			if (p != null && count[0] % 20 == 0) {
@@ -421,7 +410,6 @@ final class MugenInstaller {
 				}
 			}
 		}
-		byte[] buf = new byte[1 << 16];
 		for (String rel : files) {
 			boolean engineScript = rel.startsWith("external/");
 			File out = engineScript ? new File(root, rel) : resolveOrNew(root, rel);
@@ -433,10 +421,7 @@ final class MugenInstaller {
 				throw new IOException("No se pudo crear " + parent);
 			}
 			try (InputStream in = am.open(ENGINE_ASSETS + "/" + rel); OutputStream os = new FileOutputStream(out)) {
-				int k;
-				while ((k = in.read(buf)) > 0) {
-					os.write(buf, 0, k);
-				}
+				FileOps.copy(in, os, null);
 			}
 		}
 		writeText(stamp, version + "\n");
@@ -500,8 +485,21 @@ final class MugenInstaller {
 		{ "start", "RETURN" }, { "d", "q" }, { "w", "w" },
 	};
 
+	/** Ikemen GO's own volumes, for when the launcher's music turns them back on. */
+	private static final String[][] SOUND_DEFAULTS = { { "BGMVolume", "75" }, { "WavVolume", "80" } };
+	private static final String SOUND_KEPT = "save/launcher_sound.properties";
+
 	/** Writes or updates save/config.ini for Android and the touch controls. */
 	static void writeConfig(File root) throws IOException {
+		writeConfig(root, false, false);
+	}
+
+	/**
+	 * Same, and the player's music (MusicPlayer): muteBgm turns the game's music off (BGMVolume 0),
+	 * muteSfx its effects and voices (WavVolume 0). The volumes the game had are kept in
+	 * save/launcher_sound.properties and come back when the player's music is off again.
+	 */
+	static void writeConfig(File root, boolean muteBgm, boolean muteSfx) throws IOException {
 		File save = new File(root, "save");
 		if (!save.isDirectory() && !save.mkdirs()) {
 			throw new IOException("No se pudo crear la carpeta save");
@@ -534,6 +532,27 @@ final class MugenInstaller {
 		for (String[] k : KEYS_P1) {
 			set(lines, "Keys_P1", k[0], k[1]);
 		}
+		File keptFile = new File(root, SOUND_KEPT);
+		java.util.Properties kept = new java.util.Properties();
+		if (keptFile.isFile()) {
+			try (InputStream in = new FileInputStream(keptFile)) {
+				kept.load(in);
+			} catch (IOException | IllegalArgumentException ignored) {
+				// Start over.
+			}
+		}
+		boolean keptChanged = muteVolume(lines, kept, SOUND_DEFAULTS[0], muteBgm);
+		keptChanged |= muteVolume(lines, kept, SOUND_DEFAULTS[1], muteSfx);
+		if (keptChanged) {
+			if (kept.isEmpty()) {
+				//noinspection ResultOfMethodCallIgnored
+				keptFile.delete();
+			} else {
+				try (OutputStream os = new FileOutputStream(keptFile)) {
+					kept.store(os, "Volumes before the launcher's music turned them off");
+				}
+			}
+		}
 		StringBuilder out = new StringBuilder();
 		for (int i = 0; i < lines.size(); i++) {
 			out.append(lines.get(i));
@@ -545,6 +564,31 @@ final class MugenInstaller {
 			out.append('\n');
 		}
 		writeText(ini, out.toString());
+	}
+
+	/** Turns one [Sound] volume off (keeping the old value) or back on. True when `kept` changed. */
+	static boolean muteVolume(List<String> lines, java.util.Properties kept, String[] keyAndDefault, boolean mute) {
+		String key = keyAndDefault[0];
+		String now = get(lines, "Sound", key);
+		if (mute) {
+			boolean changed = false;
+			if (!kept.containsKey(key)) {
+				kept.setProperty(key, now == null || now.isEmpty() ? keyAndDefault[1] : now);
+				changed = true;
+			}
+			set(lines, "Sound", key, "0");
+			return changed;
+		}
+		if (!kept.containsKey(key)) {
+			return false;
+		}
+		String old = kept.getProperty(key);
+		kept.remove(key);
+		// Only if it's still off: the player may have set it in the game's options since.
+		if (now == null || "0".equals(now)) {
+			set(lines, "Sound", key, old == null || old.isEmpty() ? keyAndDefault[1] : old);
+		}
+		return true;
 	}
 
 	private static int sectionStart(List<String> lines, String section) {
