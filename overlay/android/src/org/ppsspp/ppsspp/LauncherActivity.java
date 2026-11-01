@@ -75,6 +75,7 @@ public class LauncherActivity extends Activity {
 	private static final int REQUEST_ADD_MUGEN_ZIP = 4205;
 	private static final int REQUEST_ADD_PSX = 4206;
 	private static final int REQUEST_ADD_MUSIC = 4207;
+	private static final int REQUEST_ADD_DC = 4208;
 
 	private static final String PREFS = "launcher";
 	private static final String K_URI = "game_uri";
@@ -500,6 +501,12 @@ public class LauncherActivity extends Activity {
 		if (requestCode == REQUEST_ADD_PSX) {
 			if (resultCode == RESULT_OK && data != null) {
 				onPsxAdded(data);
+			}
+			return;
+		}
+		if (requestCode == REQUEST_ADD_DC) {
+			if (resultCode == RESULT_OK && data != null) {
+				onDcAdded(data);
 			}
 			return;
 		}
@@ -1629,11 +1636,13 @@ public class LauncherActivity extends Activity {
 			"Emulador FBNeo con controles táctiles A B C D y atajos AB, CD, BC y ABC (6 botones LP MP HP / LK MK HK en los juegos de pelea de Capcom), flechas o joystick, estados guardados, filtros de imagen y modo MVS (arcade) o AES (consola). Las versiones hack necesitan también kof2002.zip." },
 		{ "PlayStation 1", ".cue + .bin · .chd · .pbp · .iso · .zip · .7z · BIOS opcional (scph1001.bin…)",
 			"Emulador PCSX ReARMed con controles táctiles de PlayStation (△ ○ ✕ □, L1 L2 R1 R2, Select y Start), flechas o joystick, tarjeta de memoria, estados guardados, filtros de imagen y resolución doble. KOF '95–'99, Tekken 3, Street Fighter Alpha 3 y más." },
+		{ "Dreamcast", ".gdi + pistas · .cdi · .chd · .zip · .7z · BIOS opcional (dc_boot.bin, dc_flash.bin)",
+			"Emulador Flycast con el mando de Dreamcast (Y X B A, gatillos L y R, Start), flechas o joystick, estados guardados, resolución interna hasta ×3, texturas mejoradas con xBRZ, pantalla ancha y los efectos de imagen. Marvel vs. Capcom 2, Capcom vs. SNK 2, Street Fighter III 3rd Strike, Soulcalibur, Guilty Gear X y más. Pide un teléfono de gama media o alta." },
 		{ "Juegos MUGEN (KOF 2012 fan made y otros)", "Carpeta o .zip del juego · motor Ikemen GO 1.0",
 			"Ikemen GO abre los juegos hechos para MUGEN 1.0 / 1.1 con su pantalla de título, selección y peleas. Controles táctiles en diseño KOF (A B C D) o de 6 botones. Necesita Android 13 o más nuevo y una GPU con OpenGL ES 3.2." },
 	};
 	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF, GameCatalog.BADGE_SF,
-		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_PSX, GameCatalog.BADGE_MUGEN };
+		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_PSX, GameCatalog.BADGE_DC, GameCatalog.BADGE_MUGEN };
 
 	/** ImageView with the shape of a PSP game icon (144 x 80). */
 	private static final class IconView extends ImageView {
@@ -1763,13 +1772,20 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams othersLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		othersLp.topMargin = dp(12);
 		col.addView(others, othersLp);
+		LinearLayout others2 = new LinearLayout(this);
+		others2.setOrientation(LinearLayout.HORIZONTAL);
+		TextView addDc = outlineButton("+  Dreamcast");
+		addDc.setOnClickListener(v -> pickDc());
 		TextView addMugen = outlineButton("+  Juego MUGEN");
 		addMugen.setOnClickListener(v -> pickMugen());
+		others2.addView(addDc, weighted(0, dp(6)));
+		others2.addView(addMugen, weighted(dp(6), 0));
 		LinearLayout.LayoutParams mugenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		mugenLp.topMargin = dp(8);
-		col.addView(addMugen, mugenLp);
+		col.addView(others2, mugenLp);
 		TextView othersHint = text("Arcade: los ZIP del juego (kof2002.zip…) y la BIOS neogeo.zip, con el emulador FBNeo. "
 			+ "PlayStation 1: el .cue con sus .bin, o un .chd, .pbp, .iso, .zip o .7z, con el emulador PCSX ReARMed. "
+			+ "Dreamcast: el .zip o .7z del juego (o el .gdi con sus pistas), un .cdi o un .chd, con el emulador Flycast. "
 			+ "MUGEN: la carpeta, el .zip o el .7z de un juego MUGEN (por ejemplo un KOF 2012 fan made), con el motor Ikemen GO. "
 			+ "Se copian dentro de la app.", 12, 0xFF6C6C78, false);
 		othersHint.setPadding(0, dp(6), 0, 0);
@@ -1800,7 +1816,7 @@ public class LauncherActivity extends Activity {
 			for (int b : GameCatalog.BADGE_ORDER) {
 				if (counts[b] > 0) {
 					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF"
-						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : "Otros") + " · " + counts[b]);
+						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : b == GameCatalog.BADGE_DC ? "Dreamcast" : "Otros") + " · " + counts[b]);
 				}
 			}
 			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1967,6 +1983,7 @@ public class LauncherActivity extends Activity {
 	private View otherSystemTile(final org.json.JSONObject e) {
 		final boolean arcade = ArcadeLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final boolean psx = PsxLibrary.SYSTEM.equals(GameCatalog.system(e));
+		final boolean dc = DreamcastLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final String title = e.optString("title", e.optString("name"));
 		int badge = GameCatalog.badge(e);
 		LinearLayout tile = new LinearLayout(this);
@@ -2007,7 +2024,7 @@ public class LauncherActivity extends Activity {
 		tile.addView(kind);
 		File file = otherFile(e);
 		boolean there = file != null && file.exists();
-		TextView detail = text(there ? (arcade ? e.optString("name") + " · FBNeo" : psx ? e.optString("format") + " · PCSX ReARMed" : "Ikemen GO · " + e.optString("name"))
+		TextView detail = text(there ? (arcade ? e.optString("name") + " · FBNeo" : psx ? e.optString("format") + " · PCSX ReARMed" : dc ? e.optString("format") + " · Flycast" : "Ikemen GO · " + e.optString("name"))
 			: "⚠ Ya no está en la app: vuelve a añadirlo", 11, there ? C_MUTED : C_WARN, false);
 		detail.setMaxLines(1);
 		detail.setEllipsize(TextUtils.TruncateAt.END);
@@ -2086,6 +2103,8 @@ public class LauncherActivity extends Activity {
 			startArcade(f, title);
 		} else if (PsxLibrary.SYSTEM.equals(GameCatalog.system(e))) {
 			startRetro(f, title, PsxLibrary.SYSTEM);
+		} else if (DreamcastLibrary.SYSTEM.equals(GameCatalog.system(e))) {
+			startDreamcast(f, title);
 		} else {
 			startMugen(f, title);
 		}
@@ -2174,7 +2193,9 @@ public class LauncherActivity extends Activity {
 		// The whole folder the import created (the game can be a folder or two inside it).
 		File top = f;
 		if (!arcade && f != null) {
-			File games = PsxLibrary.SYSTEM.equals(GameCatalog.system(e)) ? PsxLibrary.gamesDir(this) : MugenInstaller.gamesDir(this);
+			String sys = GameCatalog.system(e);
+			File games = PsxLibrary.SYSTEM.equals(sys) ? PsxLibrary.gamesDir(this)
+				: DreamcastLibrary.SYSTEM.equals(sys) ? DreamcastLibrary.gamesDir(this) : MugenInstaller.gamesDir(this);
 			File cur = f;
 			while (cur != null && cur.getParentFile() != null && !games.equals(cur.getParentFile())) {
 				cur = cur.getParentFile();
@@ -2187,7 +2208,7 @@ public class LauncherActivity extends Activity {
 		new AlertDialog.Builder(this)
 			.setTitle("¿Quitar del catálogo?")
 			.setMessage(title + "\n\nSe borra la copia que guardó la app (" + String.format(Locale.ROOT, "%.0f MB", bytes / 1048576.0)
-				+ ")" + (arcade || PsxLibrary.SYSTEM.equals(GameCatalog.system(e)) ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
+				+ ")" + (arcade || PsxLibrary.SYSTEM.equals(GameCatalog.system(e)) || DreamcastLibrary.SYSTEM.equals(GameCatalog.system(e)) ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
 			.setPositiveButton("Quitar y borrar", (d, w) -> {
 				org.json.JSONArray lib = loadLibrary();
 				org.json.JSONArray out = new org.json.JSONArray();
@@ -2416,7 +2437,7 @@ public class LauncherActivity extends Activity {
 		final android.app.ProgressDialog pd = progressDialog("Copiando juegos de PlayStation");
 		final android.content.Context app = getApplicationContext();
 		new Thread(() -> {
-			PsxLibrary.Result r = PsxLibrary.importFiles(app, uris, (what, done, total) -> handler.post(() -> pd.setMessage(
+			DiscLibrary.Result r = PsxLibrary.importFiles(app, uris, (what, done, total) -> handler.post(() -> pd.setMessage(
 				total > 0 ? String.format(Locale.ROOT, "%s\n%d de %d MB", what, done >> 20, total >> 20)
 					: String.format(Locale.ROOT, "%s\n%d MB", what, done >> 20))));
 			final List<org.json.JSONObject> added = new ArrayList<>();
@@ -2472,8 +2493,8 @@ public class LauncherActivity extends Activity {
 	}
 
 	private void buildRetroEffectsSection(LinearLayout col) {
-		LinearLayout fx = section(col, "EFECTOS · PS1 Y ARCADE");
-		TextView intro = text("Los mismos efectos de imagen que los juegos de PSP, para PlayStation 1 y Arcade / Neo Geo.", 13, C_MUTED, false);
+		LinearLayout fx = section(col, "EFECTOS · PS1, DREAMCAST Y ARCADE");
+		TextView intro = text("Los mismos efectos de imagen que los juegos de PSP, para PlayStation 1, Dreamcast y Arcade / Neo Geo.", 13, C_MUTED, false);
 		intro.setPadding(0, 0, 0, dp(10));
 		fx.addView(intro);
 		RetroEffects.Effect[] effects = RetroEffects.EFFECTS;
@@ -2492,6 +2513,7 @@ public class LauncherActivity extends Activity {
 				chip.setOnClickListener(v -> {
 					// The same for both: PS1 and arcade games each keep it (and change it in their menu).
 					retroPrefs(PsxLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
+					retroPrefs(DreamcastLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
 					retroPrefs(ArcadeLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
 					refreshRetroEffects();
 				});
@@ -2759,6 +2781,9 @@ public class LauncherActivity extends Activity {
 			if (s.usesIn(MusicPlayer.MUGEN)) {
 				b.append("• MUGEN: la música de los escenarios y los menús; golpes y voces siguen.\n");
 			}
+			if (s.usesIn(MusicPlayer.DC)) {
+				b.append("• Dreamcast: la música y los efectos salen mezclados del chip de sonido, así que se apaga todo el sonido del juego. Para oír el juego, desmarca «DC».\n");
+			}
 			if (s.usesIn(MusicPlayer.ARCADE)) {
 				b.append("• Arcade / Neo Geo: la música y los golpes salen del mismo chip de sonido, así que se apaga todo el sonido del juego. Para oír los golpes, desmarca «Arcade».\n");
 			}
@@ -2938,6 +2963,88 @@ public class LauncherActivity extends Activity {
 		}
 		musicPreview = null;
 		musicPreviewFile = null;
+	}
+
+	private void pickDc() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+		try {
+			startActivityForResult(intent, REQUEST_ADD_DC);
+			Toast.makeText(this, "Elige el .zip, .7z, .cdi o .chd del juego. Si es un .gdi, elige también sus pistas (mantén pulsado para elegir varios).", Toast.LENGTH_LONG).show();
+		} catch (ActivityNotFoundException ex) {
+			showMessage("Sin selector de archivos", "Tu teléfono no tiene un selector de archivos disponible.");
+		}
+	}
+
+	/** «+ Dreamcast»: copies each game into its own folder (and the BIOS, if any, to Flycast's). */
+	private void onDcAdded(Intent data) {
+		final List<Uri> uris = FileOps.uris(data);
+		if (uris.isEmpty()) {
+			return;
+		}
+		final android.app.ProgressDialog pd = progressDialog("Copiando juegos de Dreamcast");
+		final android.content.Context app = getApplicationContext();
+		new Thread(() -> {
+			DiscLibrary.Result r = DreamcastLibrary.importFiles(app, uris, (what, done, total) -> handler.post(() -> pd.setMessage(
+				total > 0 ? String.format(Locale.ROOT, "%s\n%d de %d MB", what, done >> 20, total >> 20)
+					: String.format(Locale.ROOT, "%s\n%d MB", what, done >> 20))));
+			final List<org.json.JSONObject> added = new ArrayList<>();
+			for (File main : r.games) {
+				try {
+					String name = main.getName();
+					int dot = name.lastIndexOf('.');
+					// A .gdi is named "disc.gdi" in most packs: the folder has the game's name.
+					String title = name.toLowerCase(Locale.ROOT).startsWith("disc.") || name.toLowerCase(Locale.ROOT).startsWith("track")
+						? DreamcastLibrary.title(main.getParentFile().getName()) : DreamcastLibrary.title(name);
+					added.add(new org.json.JSONObject()
+						.put("system", DreamcastLibrary.SYSTEM)
+						.put("uri", Uri.fromFile(main).toString())
+						.put("name", name)
+						.put("title", title)
+						.put("id", "DC")
+						.put("format", dot > 0 ? name.substring(dot + 1).toUpperCase(Locale.ROOT) : "DC"));
+				} catch (org.json.JSONException ex) {
+					Log.w(TAG, "Dreamcast entry", ex);
+				}
+			}
+			handler.post(() -> {
+				doneProgress(pd);
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				for (int i = added.size() - 1; i >= 0; i--) {
+					putInLibrary(added.get(i), true);
+				}
+				refreshLibrary();
+				StringBuilder msg = new StringBuilder();
+				if (!added.isEmpty()) {
+					msg.append(added.size() == 1 ? "Se añadió 1 juego de Dreamcast." : "Se añadieron " + added.size() + " juegos de Dreamcast.");
+				}
+				if (!r.bios.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n" : "").append("BIOS guardada: ").append(TextUtils.join(", ", r.bios))
+						.append(". Flycast la usa en vez de la suya.");
+				}
+				if (!r.problems.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n\n" : "").append("No se añadieron:\n").append(TextUtils.join("\n", r.problems));
+				}
+				if (msg.length() > 0) {
+					showMessage("Dreamcast", msg.toString());
+				}
+			});
+		}, "DcAdd").start();
+	}
+
+	/** Flycast draws with OpenGL ES 3: say so first on a phone without it. */
+	private void startDreamcast(File game, String title) {
+		ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+		int gles = am == null ? 0 : am.getDeviceConfigurationInfo().reqGlEsVersion;
+		if (gles != 0 && gles < 0x30000) {
+			showMessage("Dreamcast", "El emulador de Dreamcast necesita una GPU con OpenGL ES 3 y tu teléfono indica OpenGL ES " + (gles >> 16) + "." + (gles & 0xFFFF) + ".");
+			return;
+		}
+		startRetro(game, title, DreamcastLibrary.SYSTEM);
 	}
 
 	private void pickMugen() {
@@ -3742,6 +3849,9 @@ public class LauncherActivity extends Activity {
 		+ "■ PCSX ReARMed (PlayStation 1)\n"
 		+ "Emulador de PlayStation de los autores de PCSX y PCSX ReARMed (github.com/libretro/pcsx_rearmed), versión libretro "
 		+ "compilada por Lemuroid. Licencia GPL 2.0. Trae su propia BIOS (HLE); si añades la tuya, la usa.\n\n"
+		+ "■ Flycast (Dreamcast)\n"
+		+ "Emulador de Dreamcast de flyinghead y colaboradores, basado en reicast y nullDC (github.com/flyinghead/flycast), "
+		+ "versión 2.7 compilada como núcleo libretro para esta app. Licencia GPL 2.0. Trae su propia BIOS (HLE); si añades la tuya, la usa.\n\n"
 		+ "■ LibretroDroid\n"
 		+ "Frontend libretro para Android de Filippo Scognamiglio (github.com/Swordfish90/LibretroDroid). Licencia GPL 3.0.\n\n"
 		+ "■ Ikemen GO (MUGEN)\n"

@@ -36,13 +36,13 @@ final class GameCatalog {
 	static final int MAX_GAMES = 40;
 
 	/** Badge of each kind of game in the catalog. */
-	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4, BADGE_ARCADE = 5, BADGE_MUGEN = 6, BADGE_PSX = 7;
+	static final int BADGE_GG = 0, BADGE_BB = 1, BADGE_KOF = 2, BADGE_OTHER = 3, BADGE_SF = 4, BADGE_ARCADE = 5, BADGE_MUGEN = 6, BADGE_PSX = 7, BADGE_DC = 8;
 
-	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER", "ARCADE · NEO GEO", "MUGEN", "PLAYSTATION 1" };
-	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E, 0xFF19B98C, 0xFFA45CFF, 0xFF8C9BFF };
+	static final String[] BADGE_NAMES = { "GUILTY GEAR", "BLAZBLUE", "KOF", "OTRO JUEGO", "STREET FIGHTER", "ARCADE · NEO GEO", "MUGEN", "PLAYSTATION 1", "DREAMCAST" };
+	static final int[] BADGE_COLORS = { 0xFFD7263D, 0xFF2F6BFF, 0xFFF08A24, 0xFF6C6C78, 0xFFE8B21E, 0xFF19B98C, 0xFFA45CFF, 0xFF8C9BFF, 0xFFFF7A1A };
 
 	/** Order of the filters in the catalog ("other" last). */
-	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_ARCADE, BADGE_PSX, BADGE_MUGEN, BADGE_OTHER };
+	static final int[] BADGE_ORDER = { BADGE_GG, BADGE_BB, BADGE_KOF, BADGE_SF, BADGE_ARCADE, BADGE_PSX, BADGE_DC, BADGE_MUGEN, BADGE_OTHER };
 
 	/** The system of a catalog entry: "" for PSP, ArcadeLibrary.SYSTEM or MugenInstaller.SYSTEM. */
 	static String system(org.json.JSONObject entry) {
@@ -63,6 +63,9 @@ final class GameCatalog {
 		}
 		if (PsxLibrary.SYSTEM.equals(sys)) {
 			return BADGE_PSX;
+		}
+		if (DreamcastLibrary.SYSTEM.equals(sys)) {
+			return BADGE_DC;
 		}
 		return badge(entry.optString("id"), entry.optString("title"));
 	}
@@ -231,6 +234,7 @@ final class GameCatalog {
 			case BADGE_SF: big = "SF"; break;
 			case BADGE_MUGEN: big = "MUGEN"; break;
 			case BADGE_PSX: big = "PS1"; break;
+			case BADGE_DC: big = "DC"; break;
 			case BADGE_ARCADE: big = arcadeBig(title); break;
 			default: big = initials(title); break;
 		}

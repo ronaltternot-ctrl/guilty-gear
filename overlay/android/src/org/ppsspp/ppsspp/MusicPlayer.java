@@ -36,9 +36,9 @@ import java.util.Set;
 final class MusicPlayer {
 	private static final String TAG = "MusicPlayer";
 
-	static final String PSP = "psp", PSX = "psx", ARCADE = "arcade", MUGEN = "mugen";
-	static final String[] SYSTEMS = { PSP, PSX, ARCADE, MUGEN };
-	static final String[] SYSTEM_NAMES = { "PSP", "PS1", "Arcade", "MUGEN" };
+	static final String PSP = "psp", PSX = "psx", ARCADE = "arcade", MUGEN = "mugen", DC = "dc";
+	static final String[] SYSTEMS = { PSP, PSX, DC, ARCADE, MUGEN };
+	static final String[] SYSTEM_NAMES = { "PSP", "PS1", "DC", "Arcade", "MUGEN" };
 
 	/** What Android's player opens (the picker also accepts any audio/* file). */
 	private static final Set<String> AUDIO_EXT = new HashSet<>(Arrays.asList(
@@ -147,7 +147,9 @@ final class MusicPlayer {
 	/** True when the game must be silent: the player asked for it, or the system can't do less. */
 	static boolean mutesAllSound(Context c, String system) {
 		Settings s = load(c);
-		return s.usesIn(system) && !tracks(c).isEmpty() && (s.muteAll || ARCADE.equals(system));
+		// Arcade boards and the Dreamcast (its music is streamed and mixed by the AICA chip, with no
+		// way to tell it apart) can only go silent.
+		return s.usesIn(system) && !tracks(c).isEmpty() && (s.muteAll || ARCADE.equals(system) || DC.equals(system));
 	}
 
 	/** For the PSP emulator (acplus.ini [Music] MuteGameMusic): 0 off, 1 the music, 2 all sound. */
