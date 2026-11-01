@@ -46,13 +46,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/engine-cache
-          key: engines-${{ hashFiles('scripts/fetch_engines.sh', 'scripts/build_libretrodroid.sh', 'patches/libretrodroid/*.patch') }}
+          key: engines-${{ hashFiles('scripts/fetch_engines.sh', 'scripts/build_libretrodroid.sh', 'patches/libretrodroid/*.patch', 'scripts/build_flycast.sh') }}
 
       - name: Descargar los motores de Arcade (FBNeo) y MUGEN (Ikemen GO)
         run: bash scripts/fetch_engines.sh "$GITHUB_WORKSPACE/build/ppsspp"
 
       - name: Compilar LibretroDroid con los efectos de imagen (PS1 y Arcade)
         run: bash scripts/build_libretrodroid.sh "$GITHUB_WORKSPACE/build/ppsspp"
+
+      - name: Compilar el emulador de Dreamcast (Flycast)
+        run: bash scripts/build_flycast.sh "$GITHUB_WORKSPACE/build/ppsspp"
 
       - name: Configurar Java
         uses: actions/setup-java@v5
@@ -103,6 +106,9 @@ jobs:
           # (scripts/build_libretrodroid.sh), not the AAR's: the effects need it.
           if ! unzip -p "$APK" lib/arm64-v8a/liblibretrodroid.so | grep -aq "Custom shader chain doesn't compile"; then
             echo "The APK has LibretroDroid's original library, not the one built with the effects"; exit 1
+          fi
+          if ! unzip -l "$APK" | grep -q "lib/arm64-v8a/libflycast_libretro_android.so"; then
+            echo "The APK has no Dreamcast core"; exit 1
           fi
           cp "$APK" "out/$NAME"
           ls -la out
