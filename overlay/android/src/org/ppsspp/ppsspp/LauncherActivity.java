@@ -3951,6 +3951,10 @@ public class LauncherActivity extends Activity {
 	private static final String CREDITS =
 		"GBS++ para Android\n"
 		+ "App no oficial para jugar tus propias copias de juegos de PSP, PS1, Dreamcast, arcade y MUGEN.\n\n"
+		+ "■ Tipos de letra de los estilos del menú\n"
+		+ "Cinzel (The Cinzel Project Authors) e Inter (The Inter Project Authors), con la SIL Open Font License 1.1; "
+		+ "DejaVu Sans Condensed (© Bitstream, cambios de DejaVu en dominio público), con la licencia de Bitstream Vera. "
+		+ "Van recortados a los caracteres que usa el menú; las licencias completas están en assets/launcher_fonts/LICENSES.txt.\n\n"
 		+ "■ PPSSPP\n"
 		+ "Motor de emulación de PSP, de Henrik Rydgård y colaboradores. Licencia GPL 2.0 o posterior. "
 		+ "Esta app es PPSSPP con cambios, distribuida bajo la misma licencia. ppsspp.org\n\n"
@@ -4639,11 +4643,11 @@ public class LauncherActivity extends Activity {
 			col.addView(emblem, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(theme.emblemHeight)));
 		}
 		headerKicker = text("GUILTY GEAR XX", 12, C_ACCENT, false);
-		headerKicker.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		headerKicker.setTypeface(theme.labelTypeface(getAssets()));
 		headerKicker.setLetterSpacing(0.45f);
 		col.addView(headerKicker);
 		headerTitle = text("ΛCORE PLUS", theme.titleSize, C_TEXT, false);
-		headerTitle.setTypeface(theme.titleTypeface());
+		headerTitle.setTypeface(theme.titleTypeface(getAssets()));
 		headerTitle.setLetterSpacing(theme.titleSpacing);
 		headerTitle.setShadowLayer(dp(10), 0, 0, C_GLOW);
 		headerTitle.setPadding(0, dp(2), 0, dp(2));
@@ -4704,7 +4708,7 @@ public class LauncherActivity extends Activity {
 		gameRow.addView(gameTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 		game.addView(gameRow);
 		catalogButton = text("CATÁLOGO", 15, C_TEXT, false);
-		catalogButton.setTypeface(theme.buttonTypeface());
+		catalogButton.setTypeface(theme.buttonTypeface(getAssets()));
 		catalogButton.setGravity(Gravity.CENTER);
 		catalogButton.setLetterSpacing(0.3f);
 		catalogButton.setPadding(dp(16), dp(13), dp(16), dp(13));
@@ -5462,7 +5466,7 @@ public class LauncherActivity extends Activity {
 
 		// Play
 		playButton = filledButton("JUGAR", 20);
-		playButton.setTypeface(theme.buttonTypeface());
+		playButton.setTypeface(theme.buttonTypeface(getAssets()));
 		playButton.setLetterSpacing(0.5f);
 		playButton.setShadowLayer(dp(8), 0, 0, C_HI);
 		playButton.setPadding(dp(16), dp(18), dp(16), dp(18));
@@ -5521,7 +5525,7 @@ public class LauncherActivity extends Activity {
 		orbLp.rightMargin = dp(12);
 		header.addView(light, orbLp);
 		TextView label = text(title, 13, C_SECTION, false);
-		label.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		label.setTypeface(theme.labelTypeface(getAssets()));
 		label.setLetterSpacing(0.22f);
 		header.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 		TextView chevron = text("", 18, C_ACCENT, false);

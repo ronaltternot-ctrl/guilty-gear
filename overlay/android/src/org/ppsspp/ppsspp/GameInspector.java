@@ -79,7 +79,8 @@ final class GameInspector {
 	 */
 	static boolean isYugiohArcV(String discId, String title) {
 		if (discId != null) {
-			String id = discId.replace("-", "").replace(" ", "").toUpperCase(Locale.ROOT);
+			// Only letters and digits: IDs can come with dashes, spaces or NULs.
+			String id = discId.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
 			if (id.equals("NPJH00142")) {
 				return true;
 			}
@@ -87,9 +88,11 @@ final class GameInspector {
 		if (title == null) {
 			return false;
 		}
-		String t = title.toUpperCase(Locale.ROOT);
+		// Any run of spaces (also non-breaking ones) as one space.
+		String t = title.toUpperCase(Locale.ROOT).replaceAll("[\\s\\u00A0\\u3000]+", " ");
+		boolean arcV = t.contains("ARC-V") || t.contains("ARC V") || t.contains("ARCV");
 		return t.contains("TAG FORCE SPECIAL")
-			|| (t.contains("ARC-V") && (t.contains("TAG FORCE") || t.contains("YU-GI-OH") || t.contains("遊☆戯☆王")));
+			|| (arcV && (t.contains("TAG FORCE") || t.contains("YU-GI-OH") || t.contains("遊☆戯☆王")));
 	}
 
 	/** BlazBlue: Calamity Trigger (US, EU, JP) and Continuum Shift II (US, EU, JP, Asia). */

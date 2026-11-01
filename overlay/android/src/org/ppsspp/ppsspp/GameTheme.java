@@ -1,6 +1,10 @@
 package org.ppsspp.ppsspp;
 
+import android.content.res.AssetManager;
 import android.graphics.Typeface;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * The home screen's look for each game: colors, background picture, title letters and how sharp
@@ -59,6 +63,12 @@ final class GameTheme {
 	/** Letters of the big buttons (Play, Catalog). */
 	String buttonFamily;
 	int buttonStyle;
+	/**
+	 * The same letters as fonts bundled in assets/launcher_fonts, used first: phones with a font
+	 * theme replace the system's fonts (all of them), and the menu would lose its style. The
+	 * families above are the fallback. labelAsset (kicker and section names) is optional.
+	 */
+	String titleAsset, buttonAsset, labelAsset;
 	/** Corner radius of the cards, and the most a button or chip can have (dp). */
 	float cardRadius, buttonRadius;
 	int mark;
@@ -71,12 +81,40 @@ final class GameTheme {
 		this.id = id;
 	}
 
-	Typeface titleTypeface() {
-		return Typeface.create(titleFamily, titleStyle);
+	private static final Map<String, Typeface> FONTS = new HashMap<>();
+
+	/** A bundled font (cached), or the system family when it can't be loaded. */
+	static Typeface font(AssetManager assets, String asset, String family, int style) {
+		if (asset != null && assets != null) {
+			Typeface t;
+			synchronized (FONTS) {
+				if (!FONTS.containsKey(asset)) {
+					try {
+						FONTS.put(asset, Typeface.createFromAsset(assets, "launcher_fonts/" + asset));
+					} catch (RuntimeException e) {
+						FONTS.put(asset, null);
+					}
+				}
+				t = FONTS.get(asset);
+			}
+			if (t != null) {
+				return t;
+			}
+		}
+		return Typeface.create(family, style);
 	}
 
-	Typeface buttonTypeface() {
-		return Typeface.create(buttonFamily, buttonStyle);
+	Typeface titleTypeface(AssetManager assets) {
+		return font(assets, titleAsset, titleFamily, titleStyle);
+	}
+
+	Typeface buttonTypeface(AssetManager assets) {
+		return font(assets, buttonAsset, buttonFamily, buttonStyle);
+	}
+
+	/** The kicker above the title and the sections' names. */
+	Typeface labelTypeface(AssetManager assets) {
+		return font(assets, labelAsset, "sans-serif-light", Typeface.NORMAL);
 	}
 
 	/** A color with another alpha (0-255). */
@@ -135,6 +173,8 @@ final class GameTheme {
 		t.titleSpacing = 0.06f;
 		t.buttonFamily = "sans-serif-light";
 		t.buttonStyle = Typeface.NORMAL;
+		t.titleAsset = "Inter-Thin.otf";
+		t.buttonAsset = "Inter-Light.otf";
 		t.cardRadius = 8;
 		t.buttonRadius = 6;
 		t.mark = MARK_DOT;
@@ -170,6 +210,8 @@ final class GameTheme {
 		t.titleSpacing = 0.02f;
 		t.buttonFamily = "sans-serif-condensed";
 		t.buttonStyle = Typeface.BOLD_ITALIC;
+		t.titleAsset = "DejaVuSansCondensed-BoldOblique.ttf";
+		t.buttonAsset = "DejaVuSansCondensed-BoldOblique.ttf";
 		t.cardRadius = 2;
 		t.buttonRadius = 2;
 		t.mark = MARK_DIAMOND;
@@ -205,6 +247,8 @@ final class GameTheme {
 		t.titleSpacing = 0.05f;
 		t.buttonFamily = "sans-serif-light";
 		t.buttonStyle = Typeface.ITALIC;
+		t.titleAsset = "Inter-LightItalic.otf";
+		t.buttonAsset = "Inter-LightItalic.otf";
 		t.cardRadius = 12;
 		t.buttonRadius = 12;
 		t.mark = MARK_DIAMOND;
@@ -240,6 +284,8 @@ final class GameTheme {
 		t.titleSpacing = 0.08f;
 		t.buttonFamily = "sans-serif-condensed";
 		t.buttonStyle = Typeface.BOLD;
+		t.titleAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.buttonAsset = "DejaVuSansCondensed-Bold.ttf";
 		t.cardRadius = 4;
 		t.buttonRadius = 3;
 		t.mark = MARK_SQUARE;
@@ -275,6 +321,8 @@ final class GameTheme {
 		t.titleSpacing = 0.03f;
 		t.buttonFamily = "sans-serif-black";
 		t.buttonStyle = Typeface.ITALIC;
+		t.titleAsset = "Inter-BlackItalic.otf";
+		t.buttonAsset = "Inter-BlackItalic.otf";
 		t.cardRadius = 6;
 		t.buttonRadius = 5;
 		t.mark = MARK_DIAMOND;
@@ -319,6 +367,9 @@ final class GameTheme {
 		t.emblemHeight = 132;
 		t.buttonFamily = "serif";
 		t.buttonStyle = Typeface.BOLD;
+		t.titleAsset = "Cinzel-Bold.ttf";
+		t.buttonAsset = "Cinzel-Bold.ttf";
+		t.labelAsset = "Cinzel-SemiBold.ttf";
 		t.cardRadius = 6;
 		t.buttonRadius = 4;
 		t.mark = MARK_CRYSTAL;
