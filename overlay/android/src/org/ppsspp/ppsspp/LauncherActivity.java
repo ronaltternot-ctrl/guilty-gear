@@ -445,6 +445,11 @@ public class LauncherActivity extends Activity {
 
 	/** Whether the screen takes the colors and style of the chosen game (else always PS2). */
 	private static final String K_GAME_THEME = "game_theme";
+	/**
+	 * The game of another system chosen in the catalog (its catalog entry, JSON): arcade, PS1,
+	 * Dreamcast or MUGEN. While there is one, it's the chosen game (header, Play); else the PSP one.
+	 */
+	private static final String K_OTHER = "current_other";
 	/** The theme the screen is built with. */
 	private GameTheme theme = GameTheme.get(GameTheme.PS2);
 	private View uiRoot;
@@ -554,6 +559,7 @@ public class LauncherActivity extends Activity {
 
 		String name = queryDisplayName(uri);
 		prefs.edit()
+			.remove(K_OTHER)
 			.putString(K_URI, uri.toString())
 			.putString(K_NAME, name)
 			.remove(K_TITLE)
@@ -583,6 +589,11 @@ public class LauncherActivity extends Activity {
 	}
 
 	private void onPlayPressed() {
+		org.json.JSONObject other = currentOther();
+		if (other != null) {
+			playOther(other);
+			return;
+		}
 		if (findEmuPid() > 0) {
 			resumeGame();
 			return;
@@ -1384,6 +1395,20 @@ public class LauncherActivity extends Activity {
 	private void refreshGame() {
 		refreshHeader();
 		refreshLibrary();
+		org.json.JSONObject other = currentOther();
+		if (other != null) {
+			File f = otherFile(other);
+			boolean there = f != null && f.exists();
+			String title = cleanTitle(other.optString("title", other.optString("name")));
+			gameStatus.setText((there ? "✓ " : "⚠ ") + title);
+			gameStatus.setTextColor(there ? C_OK : C_WARN);
+			gameDetail.setText((there ? otherEngine(other) + " · " + other.optString("name")
+					: "La copia que guardó la app ya no está: quítalo del catálogo (mantén pulsado) y vuelve a añadirlo.")
+				+ "\nToca " + (theme.playLabel != null ? theme.playLabel : "JUGAR") + " para empezar. Casi todos los ajustes de abajo son de los juegos de PSP; "
+				+ "«Tu música» vale para todos y «Efectos · PS1, Dreamcast y Arcade» para esos sistemas.");
+			refreshPlayLabel();
+			return;
+		}
 		String stored = prefs.getString(K_URI, null);
 		if (stored == null) {
 			gameStatus.setText("Elige tu copia del juego");
@@ -1503,6 +1528,14 @@ public class LauncherActivity extends Activity {
 		if (headerKicker == null) {
 			return;
 		}
+		org.json.JSONObject other = currentOther();
+		if (other != null) {
+			headerKicker.setText(GameCatalog.BADGE_NAMES[GameCatalog.badge(other)]);
+			headerTitle.setText(cleanTitle(other.optString("title", other.optString("name"))).toUpperCase(Locale.ROOT));
+			headerSubtitle.setText(otherEngine(other) + " · en GBS++");
+			maybeSwitchTheme();
+			return;
+		}
 		if (isYugioh()) {
 			headerKicker.setText("YU-GI-OH! ARC-V");
 			headerTitle.setText("TAG FORCE SPECIAL");
@@ -1538,7 +1571,14 @@ public class LauncherActivity extends Activity {
 
 	/** The theme for the chosen game: its own for the fighting games the app knows, else PS2. */
 	private int wantedTheme() {
-		if (!prefs.getBoolean(K_GAME_THEME, true) || prefs.getString(K_URI, null) == null) {
+		if (!prefs.getBoolean(K_GAME_THEME, true)) {
+			return GameTheme.PS2;
+		}
+		org.json.JSONObject other = currentOther();
+		if (other != null) {
+			return otherTheme(other);
+		}
+		if (prefs.getString(K_URI, null) == null) {
 			return GameTheme.PS2;
 		}
 		if (!prefs.getBoolean(K_INSPECTED, false)) {
@@ -1562,6 +1602,89 @@ public class LauncherActivity extends Activity {
 			default:
 				return GameTheme.PS2;
 		}
+	}
+
+	/** The chosen game of another system, or null (then the chosen game is the PSP one). */
+	private org.json.JSONObject currentOther() {
+		String json = prefs.getString(K_OTHER, null);
+		if (json == null || json.isEmpty()) {
+			return null;
+		}
+		try {
+			return new org.json.JSONObject(json);
+		} catch (org.json.JSONException e) {
+			return null;
+		}
+	}
+
+	private boolean isCurrentOther(org.json.JSONObject e) {
+		org.json.JSONObject cur = currentOther();
+		return cur != null && cur.optString("uri").equals(e.optString("uri"));
+	}
+
+	/** Chooses a game of another system: the screen shows it with its style, and Play opens it. */
+	private void selectOther(org.json.JSONObject e) {
+		prefs.edit().putString(K_OTHER, e.toString()).apply();
+		if (catalogDialog != null) {
+			catalogDialog.dismiss();
+		}
+		refreshAll();
+		if (mainScroll != null) {
+			mainScroll.smoothScrollTo(0, 0);
+		}
+	}
+
+	/** "The King of Fighters 2002 (NGM-2650 ~ NGH-2650)" -> "The King of Fighters 2002". */
+	private static String cleanTitle(String title) {
+		String t = title.replaceAll("\\s*[\\(\\[].*$", "").trim();
+		return t.isEmpty() ? title.trim() : t;
+	}
+
+	/** "Arcade · FBNeo", "PlayStation 1 · PCSX ReARMed"… */
+	private static String otherEngine(org.json.JSONObject e) {
+		String sys = GameCatalog.system(e);
+		if (ArcadeLibrary.SYSTEM.equals(sys)) {
+			return "Arcade · FBNeo";
+		} else if (PsxLibrary.SYSTEM.equals(sys)) {
+			return "PlayStation 1 · PCSX ReARMed";
+		} else if (DreamcastLibrary.SYSTEM.equals(sys)) {
+			return "Dreamcast · Flycast";
+		}
+		return "MUGEN · Ikemen GO";
+	}
+
+	/**
+	 * Theme for a game of another system: the series' own when it has one (KOF 2002 in arcade,
+	 * Guilty Gear on PS1…), else its system's.
+	 */
+	private static int otherTheme(org.json.JSONObject e) {
+		String sys = GameCatalog.system(e);
+		String set = (e.optString("id") + " " + e.optString("name")).toLowerCase(Locale.ROOT);
+		String flat = (e.optString("title") + " " + e.optString("name")).toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+		boolean arcade = ArcadeLibrary.SYSTEM.equals(sys);
+		if (flat.contains("GUILTYGEAR")) {
+			return GameTheme.GUILTY_GEAR;
+		}
+		if (flat.contains("BLAZBLUE")) {
+			return GameTheme.BLAZBLUE;
+		}
+		if (flat.contains("KINGOFFIGHTERS") || (arcade && set.startsWith("kof"))) {
+			return GameTheme.KOF;
+		}
+		if (flat.contains("STREETFIGHTER") || flat.contains("STREETFIGTHER")) {
+			return GameTheme.STREET_FIGHTER;
+		}
+		if (flat.contains("YUGIOH")) {
+			return GameTheme.YUGIOH;
+		}
+		if (arcade) {
+			return GameTheme.ARCADE;
+		} else if (PsxLibrary.SYSTEM.equals(sys)) {
+			return GameTheme.PSX;
+		} else if (DreamcastLibrary.SYSTEM.equals(sys)) {
+			return GameTheme.DREAMCAST;
+		}
+		return GameTheme.MUGEN;
 	}
 
 	@SuppressWarnings("deprecation")
@@ -1714,6 +1837,13 @@ public class LauncherActivity extends Activity {
 		if (gameIcon == null) {
 			return;
 		}
+		org.json.JSONObject other = currentOther();
+		if (other != null) {
+			gameIcon.setVisibility(View.VISIBLE);
+			gameIconKey = "other|" + other.optString("uri");
+			gameIcon.setImageBitmap(GameCatalog.cover(GameCatalog.badge(other), other.optString("title", other.optString("name")), dp(112)));
+			return;
+		}
 		final String uri = prefs.getString(K_URI, null);
 		if (uri == null || !prefs.getBoolean(K_INSPECTED, false)) {
 			gameIcon.setVisibility(View.GONE);
@@ -1828,7 +1958,8 @@ public class LauncherActivity extends Activity {
 		}
 		col.removeAllViews();
 		org.json.JSONArray lib = loadLibrary();
-		String current = prefs.getString(K_URI, null);
+		// While a game of another system is chosen, no PSP game shows as chosen.
+		String current = currentOther() != null ? "" : prefs.getString(K_URI, null);
 		java.util.Set<String> readable = new java.util.HashSet<>();
 		for (UriPermission perm : getContentResolver().getPersistedUriPermissions()) {
 			if (perm.isReadPermission()) {
@@ -2107,10 +2238,11 @@ public class LauncherActivity extends Activity {
 		final boolean dc = DreamcastLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final String title = e.optString("title", e.optString("name"));
 		int badge = GameCatalog.badge(e);
+		final boolean chosen = isCurrentOther(e);
 		LinearLayout tile = new LinearLayout(this);
 		tile.setOrientation(LinearLayout.VERTICAL);
 		tile.setPadding(dp(8), dp(8), dp(8), dp(10));
-		tile.setBackground(ripple(C_CARD, C_STROKE, 14));
+		tile.setBackground(ripple(C_CARD, chosen ? C_ACCENT : C_STROKE, 14));
 		makeClickable(tile);
 
 		IconView img = new IconView(this);
@@ -2122,13 +2254,16 @@ public class LauncherActivity extends Activity {
 		img.setImageBitmap(GameCatalog.cover(badge, title, dp(120)));
 		FrameLayout pic = new FrameLayout(this);
 		pic.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-		TextView play = text("▶ JUGAR", 10, Color.WHITE, true);
+		// The pill opens the game right away; the rest of the tile chooses it.
+		TextView play = text(chosen ? "▶ ELEGIDO · JUGAR" : "▶ JUGAR", 10, Color.WHITE, true);
 		play.setLetterSpacing(0.1f);
-		play.setPadding(dp(7), dp(3), dp(7), dp(3));
+		play.setPadding(dp(9), dp(5), dp(9), dp(5));
 		GradientDrawable pill = new GradientDrawable();
 		pill.setColor(GameCatalog.BADGE_COLORS[badge]);
 		pill.setCornerRadius(dp(8));
 		play.setBackground(pill);
+		makeClickable(play);
+		play.setOnClickListener(v -> playOther(e));
 		FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
 		plp.setMargins(dp(6), dp(6), 0, 0);
 		pic.addView(play, plp);
@@ -2152,7 +2287,7 @@ public class LauncherActivity extends Activity {
 		detail.setPadding(0, dp(2), 0, 0);
 		tile.addView(detail);
 
-		tile.setOnClickListener(v -> playOther(e));
+		tile.setOnClickListener(v -> selectOther(e));
 		tile.setOnLongClickListener(v -> {
 			confirmRemoveOther(e);
 			return true;
@@ -2340,7 +2475,12 @@ public class LauncherActivity extends Activity {
 					}
 				}
 				prefs.edit().putString(K_LIBRARY, out.toString()).apply();
-				refreshLibrary();
+				if (isCurrentOther(e)) {
+					prefs.edit().remove(K_OTHER).apply();
+					refreshAll();
+				} else {
+					refreshLibrary();
+				}
 				if (remove != null) {
 					new Thread(() -> MugenInstaller.deleteTree(remove), "RemoveGame").start();
 				}
@@ -3399,6 +3539,7 @@ public class LauncherActivity extends Activity {
 		String title = e.optString("title");
 		String id = e.optString("id");
 		prefs.edit()
+			.remove(K_OTHER)
 			.putString(K_URI, uri.toString())
 			.putString(K_NAME, e.optString("name"))
 			.putString(K_TITLE, title.isEmpty() ? null : title)
@@ -4600,7 +4741,9 @@ public class LauncherActivity extends Activity {
 		if (playButton == null) {
 			return;
 		}
-		if (findEmuPid() > 0) {
+		if (currentOther() != null) {
+			playButton.setText(theme.playLabel != null ? theme.playLabel : "JUGAR");
+		} else if (findEmuPid() > 0) {
 			playButton.setText("CONTINUAR PARTIDA");
 		} else if (prefs.getString(K_URI, null) == null) {
 			playButton.setText("ELEGIR JUEGO");

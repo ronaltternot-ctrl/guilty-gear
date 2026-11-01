@@ -18,6 +18,11 @@ final class GameTheme {
 	static final int KOF = 3;
 	static final int STREET_FIGHTER = 4;
 	static final int YUGIOH = 5;
+	// Games of the other systems without a theme of their own (chosen in the catalog).
+	static final int ARCADE = 6;
+	static final int PSX = 7;
+	static final int DREAMCAST = 8;
+	static final int MUGEN = 9;
 
 	/** Background pictures (GameBackground). */
 	static final int BG_TOWERS = 0;   // PS2: towers of light on a horizon, specks of light
@@ -27,6 +32,7 @@ final class GameTheme {
 	static final int BG_RAYS = 4;     // Street Fighter Alpha: a sunburst from the top
 	static final int BG_PENDULUM = 5; // Yu-Gi-Oh! ARC-V: a pendulum of light and its arc, the
 	                                  // scales' pillars, a holographic field, cards, sparkles
+	static final int BG_GRID = 6;     // Arcade: a neon grid running to a striped retro sun
 
 	/** Shape of the small light before each section's title. */
 	static final int MARK_DOT = 0;
@@ -122,7 +128,8 @@ final class GameTheme {
 		return (color & 0x00FFFFFF) | (alpha << 24);
 	}
 
-	private static final GameTheme[] THEMES = { ps2(), guiltyGear(), blazBlue(), kof(), streetFighter(), yugioh() };
+	private static final GameTheme[] THEMES = { ps2(), guiltyGear(), blazBlue(), kof(), streetFighter(), yugioh(),
+		arcade(), psx(), dreamcast(), mugen() };
 
 	static GameTheme get(int id) {
 		return id >= 0 && id < THEMES.length ? THEMES[id] : THEMES[PS2];
@@ -375,6 +382,126 @@ final class GameTheme {
 		t.mark = MARK_CRYSTAL;
 		t.cardDetail = true;
 		t.playLabel = "DUELO";
+		return t;
+	}
+
+	private static int mix(int a, int b, float t) {
+		int r = Math.round(((a >> 16) & 0xFF) * (1 - t) + ((b >> 16) & 0xFF) * t);
+		int g = Math.round(((a >> 8) & 0xFF) * (1 - t) + ((b >> 8) & 0xFF) * t);
+		int bl = Math.round((a & 0xFF) * (1 - t) + (b & 0xFF) * t);
+		return 0xFF000000 | (r << 16) | (g << 8) | bl;
+	}
+
+	/** A theme made from one color (the systems' themes): dark field, lit buttons, soft text. */
+	private static GameTheme tinted(int id, int base, int pattern) {
+		GameTheme t = new GameTheme(id);
+		int black = 0xFF000000, white = 0xFFFFFFFF;
+		t.bg = mix(base, black, 0.96f);
+		t.card = alpha(mix(base, black, 0.86f), 0x5C);
+		t.stroke = alpha(base, 0x3C);
+		t.accent = base;
+		t.hi = mix(base, white, 0.6f);
+		t.text = mix(white, base, 0.06f);
+		t.muted = mix(0xFF8C8C98, base, 0.25f);
+		t.section = mix(white, base, 0.28f);
+		t.chipStroke = alpha(mix(base, black, 0.3f), 0x66);
+		t.glow = alpha(base, 0x99);
+		t.track = mix(base, black, 0.78f);
+		t.inset = mix(base, black, 0.93f);
+		t.glassTop = mix(base, black, 0.12f);
+		t.glassMid = mix(base, black, 0.38f);
+		t.glassBottom = mix(base, black, 0.64f);
+		t.glassEdge = mix(base, white, 0.55f);
+		t.pattern = pattern;
+		t.sky = new int[] { mix(base, black, 0.80f), mix(base, black, 0.90f), mix(base, black, 0.96f), black };
+		t.skyGlow = mix(base, black, 0.3f);
+		t.ink = base;
+		t.inkHi = mix(base, white, 0.5f);
+		t.ink2 = base;
+		t.ink3 = base;
+		t.titleSpacing = 0.04f;
+		t.cardRadius = 6;
+		t.buttonRadius = 5;
+		t.mark = MARK_DOT;
+		return t;
+	}
+
+	/** Arcade: hot pink and cyan neon, a grid running to a retro sun, condensed letters. */
+	private static GameTheme arcade() {
+		GameTheme t = tinted(ARCADE, 0xFFFF4FD8, BG_GRID);
+		t.accent = 0xFF34E6FF;
+		t.hi = 0xFFB8F6FF;
+		t.glow = 0x9934E6FF;
+		t.ink = 0xFFFF4FD8;
+		t.inkHi = 0xFFFFB3EF;
+		t.ink2 = 0xFF34E6FF;
+		t.ink3 = 0xFFFFC94D;
+		t.sky = new int[] { 0xFF1A0630, 0xFF10041F, 0xFF07020E, 0xFF000000 };
+		t.skyGlow = 0xFF7A1FA8;
+		t.titleFamily = "sans-serif-condensed";
+		t.titleStyle = Typeface.BOLD;
+		t.buttonFamily = "sans-serif-condensed";
+		t.buttonStyle = Typeface.BOLD;
+		t.titleAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.buttonAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.titleSpacing = 0.06f;
+		t.cardRadius = 4;
+		t.buttonRadius = 3;
+		t.mark = MARK_SQUARE;
+		return t;
+	}
+
+	/** PlayStation 1: the console's silver-gray, the towers of light, thin letters. */
+	private static GameTheme psx() {
+		GameTheme t = tinted(PSX, 0xFFA9B4D0, BG_TOWERS);
+		t.glassTop = 0xFF6F7896;
+		t.glassMid = 0xFF4A5068;
+		t.glassBottom = 0xFF2A2E3D;
+		t.sky = new int[] { 0xFF1E2230, 0xFF12141D, 0xFF08090D, 0xFF000000 };
+		t.titleFamily = "sans-serif-light";
+		t.titleStyle = Typeface.NORMAL;
+		t.buttonFamily = "sans-serif-light";
+		t.buttonStyle = Typeface.NORMAL;
+		t.titleAsset = "Inter-Light.otf";
+		t.buttonAsset = "Inter-Light.otf";
+		t.titleSpacing = 0.08f;
+		t.cardRadius = 6;
+		t.buttonRadius = 5;
+		return t;
+	}
+
+	/** Dreamcast: orange on deep navy, rings, black slanted letters. */
+	private static GameTheme dreamcast() {
+		GameTheme t = tinted(DREAMCAST, 0xFFFF7A1A, BG_RINGS);
+		t.sky = new int[] { 0xFF0F1426, 0xFF090C18, 0xFF04050B, 0xFF000000 };
+		t.card = 0x5C10162A;
+		t.skyGlow = 0xFF2A3F8A;
+		t.titleFamily = "sans-serif-black";
+		t.titleStyle = Typeface.ITALIC;
+		t.buttonFamily = "sans-serif-black";
+		t.buttonStyle = Typeface.ITALIC;
+		t.titleAsset = "Inter-BlackItalic.otf";
+		t.buttonAsset = "Inter-BlackItalic.otf";
+		t.titleSpacing = 0.03f;
+		t.cardRadius = 10;
+		t.buttonRadius = 10;
+		t.mark = MARK_DOT;
+		return t;
+	}
+
+	/** MUGEN: violet, slashes, heavy slanted letters. */
+	private static GameTheme mugen() {
+		GameTheme t = tinted(MUGEN, 0xFFA45CFF, BG_SLASHES);
+		t.titleFamily = "sans-serif-condensed";
+		t.titleStyle = Typeface.BOLD_ITALIC;
+		t.buttonFamily = "sans-serif-condensed";
+		t.buttonStyle = Typeface.BOLD_ITALIC;
+		t.titleAsset = "DejaVuSansCondensed-BoldOblique.ttf";
+		t.buttonAsset = "DejaVuSansCondensed-BoldOblique.ttf";
+		t.titleSpacing = 0.03f;
+		t.cardRadius = 3;
+		t.buttonRadius = 2;
+		t.mark = MARK_DIAMOND;
 		return t;
 	}
 }

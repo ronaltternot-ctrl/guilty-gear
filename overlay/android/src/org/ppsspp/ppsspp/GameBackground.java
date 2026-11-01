@@ -24,6 +24,7 @@ import java.util.Random;
  * - BlazBlue: the rings of a magic seal, with ticks and a six-pointed star.
  * - KOF: fire glowing from below, flames and rising embers.
  * - Street Fighter Alpha: a sunburst from the top and specks of gold.
+ * - Arcade: a neon grid running to the horizon, under a striped retro sun and stars.
  * - Yu-Gi-Oh! ARC-V: the pillars of the pendulum scales on both sides, a holographic field of
  *   hexagons, cards floating over it and sparkles; and, as an emblem above the title (a second
  *   GameBackground made with emblem = true), a pendulum of light swinging over a rainbow arc.
@@ -82,7 +83,8 @@ final class GameBackground extends Drawable {
 			dots[i * 4] = r.nextFloat();
 			float y = r.nextFloat();
 			// Embers gather near the fire; specks of light stay in the upper part.
-			dots[i * 4 + 1] = theme.pattern == GameTheme.BG_EMBERS ? 0.3f + 0.7f * (float) Math.sqrt(y) : y * 0.8f;
+			dots[i * 4 + 1] = theme.pattern == GameTheme.BG_EMBERS ? 0.3f + 0.7f * (float) Math.sqrt(y)
+				: theme.pattern == GameTheme.BG_GRID ? y * 0.55f : y * 0.8f;
 			dots[i * 4 + 2] = 0.5f + r.nextFloat() * 1.2f;
 			dots[i * 4 + 3] = 0.08f + r.nextFloat() * r.nextFloat() * 0.5f;
 		}
@@ -127,6 +129,24 @@ final class GameBackground extends Drawable {
 			case GameTheme.BG_PENDULUM:
 				shaders = new Shader[0];
 				break;
+			case GameTheme.BG_GRID: {
+				float horizon = h * GRID_HORIZON;
+				float r = w * 0.30f;
+				float cy = horizon - r * 0.2f;
+				shaders = new Shader[] {
+					new RadialGradient(w * 0.5f, cy, r * 2.1f,
+						new int[] { GameTheme.alpha(t.ink, 0x58), GameTheme.alpha(t.ink, 0x18), 0x00000000 },
+						new float[] { 0f, 0.5f, 1f }, Shader.TileMode.CLAMP),
+					new LinearGradient(0, cy - r, 0, cy + r * 0.2f, t.ink3, t.ink, Shader.TileMode.CLAMP),
+					new LinearGradient(0, horizon, 0, h,
+						new int[] { GameTheme.alpha(t.ink2, 0x18), GameTheme.alpha(t.ink2, 0x70), GameTheme.alpha(t.ink2, 0xA0) },
+						new float[] { 0f, 0.4f, 1f }, Shader.TileMode.CLAMP),
+					new LinearGradient(0, horizon, 0, h, 0xE00A0314, 0xFF000000, Shader.TileMode.CLAMP),
+					new LinearGradient(0, 0, w, 0,
+						new int[] { 0x00000000, GameTheme.alpha(t.ink2, 0xE0), 0x00000000 }, null, Shader.TileMode.CLAMP),
+				};
+				break;
+			}
 			case GameTheme.BG_EMBERS: {
 				shaders = new Shader[items.length / 4 + 1];
 				shaders[0] = new LinearGradient(0, h, 0, h * 0.5f,
@@ -200,6 +220,7 @@ final class GameBackground extends Drawable {
 			case GameTheme.BG_RINGS: drawRings(canvas, w, h); break;
 			case GameTheme.BG_EMBERS: drawEmbers(canvas, w, h); break;
 			case GameTheme.BG_RAYS: drawRays(canvas, w, h); break;
+			case GameTheme.BG_GRID: drawGrid(canvas, w, h); break;
 			default: drawTowers(canvas, w, h); break;
 		}
 		drawDots(canvas, w, h);
@@ -585,6 +606,54 @@ final class GameBackground extends Drawable {
 		// A thin line of heat along the bottom.
 		extra.setColor(GameTheme.alpha(t.inkHi, 0x40));
 		canvas.drawRect(0, h - Math.max(1f, density), w, h, extra);
+	}
+
+	private static final float GRID_HORIZON = 0.60f;
+
+	/** Arcade: a striped retro sun on the horizon and a neon grid running to it. */
+	private void drawGrid(Canvas canvas, int w, int h) {
+		float horizon = h * GRID_HORIZON;
+		float r = w * 0.30f;
+		float cx = w * 0.5f;
+		float cy = horizon - r * 0.2f;
+		shape.setShader(shaders[0]);
+		canvas.drawCircle(cx, cy, r * 2.1f, shape);
+		// The sun, cut by the horizon and by stripes that get thicker towards the bottom.
+		canvas.save();
+		path.reset();
+		path.addCircle(cx, cy, r, Path.Direction.CW);
+		canvas.clipPath(path);
+		canvas.clipRect(0, 0, w, horizon);
+		shape.setShader(shaders[1]);
+		canvas.drawRect(cx - r, cy - r, cx + r, horizon, shape);
+		float y = cy - r * 0.05f;
+		for (int k = 0; k < 6; k++) {
+			float band = (1.5f + k * 1.3f) * density;
+			canvas.drawRect(cx - r, y, cx + r, y + band, fill);
+			y += band + (9 - k) * density;
+		}
+		canvas.restore();
+		// The floor and its grid.
+		shape.setShader(shaders[3]);
+		canvas.drawRect(0, horizon, w, h, shape);
+		line.setColor(0xFFFFFFFF);
+		line.setShader(shaders[2]);
+		line.setStrokeWidth(Math.max(1f, density));
+		for (int i = -9; i <= 9; i++) {
+			canvas.drawLine(cx + i * w * 0.012f, horizon, cx + i * w * 0.17f, h, line);
+		}
+		for (int k = 1; k <= 12; k++) {
+			float gy = horizon + (h - horizon) * (float) Math.pow(k / 12f, 2.0);
+			canvas.drawLine(0, gy, w, gy, line);
+		}
+		line.setShader(null);
+		// The horizon, glowing.
+		shape.setShader(shaders[4]);
+		shape.setAlpha(0x50);
+		canvas.drawRect(0, horizon - 3 * density, w, horizon + 3 * density, shape);
+		shape.setAlpha(255);
+		canvas.drawRect(0, horizon - 0.75f * density, w, horizon + 0.75f * density, shape);
+		shape.setShader(null);
 	}
 
 	/** Street Fighter Alpha: a sunburst rising from the top, with a warm glow at its center. */

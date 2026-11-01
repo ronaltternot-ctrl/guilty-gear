@@ -134,12 +134,14 @@ final class GameInspector {
 			if (isKof(discId, title)) {
 				return Match.KOF;
 			}
+			boolean acPlusId = discId != null && discId.replaceAll("[^A-Za-z0-9]", "").equalsIgnoreCase("ULUS10409");
 			if (title == null) {
-				return Match.UNKNOWN;
+				return acPlusId ? Match.TARGET : Match.UNKNOWN;
 			}
-			String t = title.toUpperCase(Locale.ROOT);
-			if (t.contains("GUILTY GEAR")) {
-				return t.contains("CORE") ? Match.TARGET : Match.OTHER_GUILTY_GEAR;
+			// Without spaces: the PSN release says "GUILTYGEAR XX ΛCORE PLUS".
+			String flat = title.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9Λ]", "");
+			if (acPlusId || flat.contains("GUILTYGEAR")) {
+				return acPlusId || flat.contains("CORE") ? Match.TARGET : Match.OTHER_GUILTY_GEAR;
 			}
 			return Match.OTHER_GAME;
 		}
