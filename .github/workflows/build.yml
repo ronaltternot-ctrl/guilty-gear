@@ -101,7 +101,7 @@ jobs:
           mkdir -p out
           APK="$(find build/ppsspp/android/build/outputs/apk -name '*.apk' | head -n 1)"
           if [ -z "$APK" ]; then echo "No se generó ningún APK"; exit 1; fi
-          NAME="GGXX-ACPlus-Android-v1.0.${GITHUB_RUN_NUMBER}.apk"
+          NAME="GBS-PlusPlus-Android-v1.0.${GITHUB_RUN_NUMBER}.apk"
           # The APK must carry LibretroDroid's library built with the launcher's changes
           # (scripts/build_libretrodroid.sh), not the AAR's: the effects need it.
           if ! unzip -p "$APK" lib/arm64-v8a/liblibretrodroid.so | grep -aq "Custom shader chain doesn't compile"; then
@@ -126,7 +126,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: GGXX AC+ para Android · versión 1.0.${{ github.run_number }}
+          name: GBS++ para Android · versión 1.0.${{ github.run_number }}
           make_latest: true
           files: out/*.apk
           body: |

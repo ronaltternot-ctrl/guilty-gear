@@ -119,7 +119,7 @@ inline void Init() {
 
 inline void WriteReport(const PspMem &m) {
 	State &s = Get();
-	std::string text = "GGXX AC+ hitbox viewer report\n";
+	std::string text = "GBS++ hitbox viewer report\n";
 	const std::string status = s.detector.Status();
 	// Empty status = detection finished; the launcher shows this line.
 	text += "status: " + (status.empty() ? std::string(s.camera.fromMemory ? "funcionando" : "funcionando (camara aproximada)") : status) + "\n";

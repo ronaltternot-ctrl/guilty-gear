@@ -1479,19 +1479,19 @@ public class LauncherActivity extends Activity {
 			boolean cs = t != null && t.toUpperCase(Locale.ROOT).contains("CONTINUUM");
 			headerKicker.setText("BLAZBLUE");
 			headerTitle.setText(cs ? "CONTINUUM SHIFT II" : "CALAMITY TRIGGER");
-			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
+			headerSubtitle.setText("Edición PSP · en GBS++");
 		} else if (isKof()) {
 			String t = prefs.getString(K_TITLE, "");
 			boolean portable = t != null && t.toUpperCase(Locale.ROOT).contains("PORTABLE");
 			headerKicker.setText("THE KING OF FIGHTERS");
 			headerTitle.setText(portable ? "PORTABLE '94~'98" : "OROCHI SAGA");
-			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
+			headerSubtitle.setText("Edición PSP · en GBS++");
 		} else if (isStreetFighter()) {
 			String t = prefs.getString(K_TITLE, "");
 			boolean zero = t != null && t.toUpperCase(Locale.ROOT).contains("ZERO");
 			headerKicker.setText("STREET FIGHTER");
 			headerTitle.setText(zero ? "ZERO 3 ↑↑" : "ALPHA 3 MAX");
-			headerSubtitle.setText("Edición PSP · en la misma app que Guilty Gear");
+			headerSubtitle.setText("Edición PSP · en GBS++");
 		} else {
 			headerKicker.setText("GUILTY GEAR XX");
 			headerTitle.setText("ΛCORE PLUS");
@@ -3828,8 +3828,8 @@ public class LauncherActivity extends Activity {
 		+ "THE SOFTWARE.";
 
 	private static final String CREDITS =
-		"GGXX ΛC+ para Android\n"
-		+ "App no oficial para jugar tu copia de Guilty Gear XX Accent Core Plus (PSP).\n\n"
+		"GBS++ para Android\n"
+		+ "App no oficial para jugar tus propias copias de juegos de PSP, PS1, Dreamcast, arcade y MUGEN.\n\n"
 		+ "■ PPSSPP\n"
 		+ "Motor de emulación de PSP, de Henrik Rydgård y colaboradores. Licencia GPL 2.0 o posterior. "
 		+ "Esta app es PPSSPP con cambios, distribuida bajo la misma licencia. ppsspp.org\n\n"
@@ -4208,7 +4208,7 @@ public class LauncherActivity extends Activity {
 		}
 		Intent send = new Intent(Intent.ACTION_SEND);
 		send.setType("text/plain");
-		send.putExtra(Intent.EXTRA_TEXT, "Únete a mi sala de " + gameShortName() + " (GGXX AC+ en Android → Multijugador → Unirme): " + code);
+		send.putExtra(Intent.EXTRA_TEXT, "Únete a mi sala de " + gameShortName() + " (GBS++ en Android → Multijugador → Unirme): " + code);
 		startActivity(Intent.createChooser(send, "Compartir código de sala"));
 	}
 
@@ -4234,7 +4234,7 @@ public class LauncherActivity extends Activity {
 				"Activa el visor, juega un combate unos segundos y vuelve aquí. Si las cajas salen mal, guarda también un estado en ese momento (Atrás → «Guardar estado»).");
 			return;
 		}
-		shareFiles(files, "Informe del visor de hitboxes de GGXX AC+", "Enviar informe del visor");
+		shareFiles(files, "Informe del visor de hitboxes de GBS++", "Enviar informe del visor");
 	}
 
 	/** What the emulator read in BlazBlue / KOF (UI/AcPlusProfiles.h writes it while playing). */
@@ -4247,7 +4247,7 @@ public class LauncherActivity extends Activity {
 		}
 		ArrayList<File> files = new ArrayList<>();
 		files.add(report);
-		shareFiles(files, "Informe de " + gameShortName() + " para GGXX AC+ (qué leyó la app en la memoria del juego)", "Enviar informe del juego");
+		shareFiles(files, "Informe de " + gameShortName() + " para GBS++ (qué leyó la app en la memoria del juego)", "Enviar informe del juego");
 	}
 
 	private void shareFiles(List<File> files, String text, String title) {

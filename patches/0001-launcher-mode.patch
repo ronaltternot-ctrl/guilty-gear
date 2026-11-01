@@ -147,7 +147,7 @@ index 0d625d0..53f0dd4 100644
  <resources>
  
 -    <string name="app_name">PPSSPP</string>
-+    <string name="app_name">GGXX AC+</string>
++    <string name="app_name">GBS++</string>
      <string name="shortcut_name">PPSSPP game</string>
  
  </resources>

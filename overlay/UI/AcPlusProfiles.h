@@ -176,7 +176,7 @@ inline void WriteReport(const PspMem &m, double t, const std::string &fighter) {
 	if (s.reader.GetTitle() != AcGame::TITLE_BB && s.reader.GetTitle() != AcGame::TITLE_KOF && s.reader.GetTitle() != AcGame::TITLE_SF)
 		return;
 	s.lastReport = t;
-	std::string text = "GGXX AC+ game report\n";
+	std::string text = "GBS++ game report\n";
 	text += "your side: " + std::string(s.side == 0 ? "1P" : "2P") + ", detected: " + (fighter.empty() ? std::string("(nobody yet)") : fighter) + "\n";
 	text += s.reader.Report(m, t);
 	File::WriteStringToFile(true, text, s.reportPath);

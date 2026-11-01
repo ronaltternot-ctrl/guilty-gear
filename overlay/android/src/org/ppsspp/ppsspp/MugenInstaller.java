@@ -514,7 +514,7 @@ final class MugenInstaller {
 			}
 		} else {
 			ini = new File(save, "config.ini");
-			lines.add("; Ikemen GO config written by the GGXX AC+ launcher for this MUGEN game.");
+			lines.add("; Ikemen GO config written by the GBS++ launcher for this MUGEN game.");
 		}
 		// Keep the motif of a game made for Ikemen GO (its own config); otherwise the game's own.
 		String motif = get(lines, "Config", "Motif");

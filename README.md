@@ -1,4 +1,6 @@
-# GGXX ΛC+ para Android
+# GBS++ para Android
+
+> Antes se llamaba **GGXX ΛC+**. Al instalar la versión nueva encima se conservan tus juegos y ajustes: el paquete (`com.acplus.psplauncher`) es el mismo.
 
 App de Android dedicada a **Guilty Gear XX Accent Core Plus (versión PSP)**: abres la app, eliges tu copia del juego una vez y a partir de ahí entras directo a jugar, con los botones originales de la PSP en pantalla (o tu control Bluetooth) y la resolución que quieras, **desde la original de PSP hasta 4K**.
 
@@ -12,6 +14,7 @@ Por dentro usa el motor de emulación de [PPSSPP](https://www.ppsspp.org/) con u
 
 | | |
 |---|---|
+| **Nombre y logo** | La app se llama **GBS++**. Su ícono sigue el estilo de la pantalla de inicio: noche azul de PS2 con las torres de luz y las letras con brillo. Es adaptable (cualquier forma de ícono del teléfono) y en Android 13+ toma el color del tema si usas íconos temáticos. Lo genera `scripts/icon/make_icon.py`. |
 | **Estilo PS2** | La pantalla de inicio tiene un estilo minimalista y retro, como los menús de PlayStation 2: fondo azul oscuro con las torres de luz del arranque, letras finas y cada sección en una línea que se abre y se cierra (+ / −), así la pantalla queda corta. |
 | **Arranque directo** | Sin menús de emulador: pulsas *Jugar* y entra el juego. |
 | **Resolución 1× a 8×** | 1× = 480×272 (PSP original) · 4× = 1920×1088 (Full HD) · **8× = 3840×2176 (4K)**. Te recomienda la mejor para tu pantalla. |
@@ -54,7 +57,7 @@ GitHub compila la app gratis en sus servidores. Solo necesitas una cuenta.
    - Si después no ves nada en la pestaña **Actions**, es que la carpeta oculta `.github` no se subió. Crea el archivo a mano: *Add file → Create new file*, nombre `.github/workflows/build.yml`, y pega el contenido de ese archivo.
 4. **Espera a que compile**: pestaña **Actions** → verás *Compilar APK* en marcha. Tarda unos 30–60 minutos la primera vez (las siguientes, menos).
    - Si no arrancó solo, entra en *Compilar APK* → *Run workflow*.
-5. **Descarga el APK en tu teléfono**: en la página del repositorio, sección **Releases** (a la derecha) → abre la última → toca el archivo `GGXX-ACPlus-Android-….apk`.
+5. **Descarga el APK en tu teléfono**: en la página del repositorio, sección **Releases** (a la derecha) → abre la última → toca el archivo `GBS-PlusPlus-Android-….apk`.
 6. **Instálalo**: Android te pedirá permiso para instalar apps de origen desconocido para tu navegador. Acéptalo e instala.
 
 Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se instala encima conservando tus partidas.
@@ -62,7 +65,7 @@ Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se inst
 ## Primer uso
 
 1. Copia tu ISO o CSO del juego a la memoria del teléfono (por ejemplo a *Descargas*) o a la microSD. Evita Google Drive u otras nubes: tiene que estar en el teléfono.
-2. Abre **GGXX AC+** → *Elegir archivo ISO / CSO* → selecciónalo. Verás ✓, el icono y el nombre del juego. Si tienes varios juegos, entra en **CATÁLOGO** → *Añadir juegos* y elígelos todos a la vez.
+2. Abre **GBS++** → *Elegir archivo ISO / CSO* → selecciónalo. Verás ✓, el icono y el nombre del juego. Si tienes varios juegos, entra en **CATÁLOGO** → *Añadir juegos* y elígelos todos a la vez.
 3. Elige la resolución (la marcada como recomendada es un buen punto de partida) y pulsa **JUGAR**.
 
 ## Si algo no va bien
