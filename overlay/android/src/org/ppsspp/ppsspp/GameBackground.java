@@ -1,5 +1,6 @@
 package org.ppsspp.ppsspp;
 
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.DashPathEffect;
@@ -9,6 +10,7 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.RadialGradient;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 
@@ -22,6 +24,10 @@ import java.util.Random;
  * - BlazBlue: the rings of a magic seal, with ticks and a six-pointed star.
  * - KOF: fire glowing from below, flames and rising embers.
  * - Street Fighter Alpha: a sunburst from the top and specks of gold.
+ * - Yu-Gi-Oh! ARC-V: the pillars of the pendulum scales on both sides, a holographic field of
+ *   hexagons, cards floating over it and sparkles; and, as an emblem above the title (a second
+ *   GameBackground made with emblem = true), a pendulum of light swinging over a rainbow arc.
+ *   The most detailed one: each is drawn once into a bitmap.
  * Static (it doesn't move with the page, and the shapes are fixed), so scrolling stays smooth.
  */
 final class GameBackground extends Drawable {
@@ -41,8 +47,18 @@ final class GameBackground extends Drawable {
 	private Shader[] shaders = new Shader[0];
 	private final Path path = new Path();
 	private DashPathEffect dash;
+	/** The pendulum picture, drawn once per size. */
+	private Bitmap cache;
+
+	/** Only the emblem (transparent), for the stage above the title; see drawEmblem. */
+	private final boolean emblem;
 
 	GameBackground(GameTheme theme, float density) {
+		this(theme, density, false);
+	}
+
+	GameBackground(GameTheme theme, float density, boolean emblem) {
+		this.emblem = emblem;
 		this.t = theme;
 		this.density = density;
 		Random r = new Random(2000 + theme.pattern);
@@ -50,16 +66,17 @@ final class GameBackground extends Drawable {
 		switch (theme.pattern) {
 			case GameTheme.BG_SLASHES: n = 18; break;   // scratches: x, y, length, alpha
 			case GameTheme.BG_EMBERS: n = 10; break;    // flames: x, width, height, alpha
+			case GameTheme.BG_PENDULUM: n = 14; break;  // sparkles: x, y, size, alpha
 			default: n = 15; break;                     // towers: x, width, height, alpha
 		}
 		items = new float[n * 4];
 		for (int i = 0; i < n; i++) {
-			items[i * 4] = theme.pattern == GameTheme.BG_SLASHES ? r.nextFloat() : (i + 0.5f) / n + (r.nextFloat() - 0.5f) * 0.04f;
+			items[i * 4] = theme.pattern == GameTheme.BG_SLASHES || theme.pattern == GameTheme.BG_PENDULUM ? r.nextFloat() : (i + 0.5f) / n + (r.nextFloat() - 0.5f) * 0.04f;
 			items[i * 4 + 1] = r.nextFloat();
 			items[i * 4 + 2] = r.nextFloat();
 			items[i * 4 + 3] = r.nextFloat();
 		}
-		int m = theme.pattern == GameTheme.BG_EMBERS ? 64 : theme.pattern == GameTheme.BG_SLASHES ? 0 : theme.pattern == GameTheme.BG_TOWERS ? 70 : 40;
+		int m = theme.pattern == GameTheme.BG_EMBERS ? 64 : theme.pattern == GameTheme.BG_SLASHES ? 0 : theme.pattern == GameTheme.BG_TOWERS ? 70 : theme.pattern == GameTheme.BG_PENDULUM ? 46 : 40;
 		dots = new float[m * 4];   // x, y, radius (dp), alpha
 		for (int i = 0; i < m; i++) {
 			dots[i * 4] = r.nextFloat();
@@ -107,6 +124,7 @@ final class GameBackground extends Drawable {
 				};
 				break;
 			case GameTheme.BG_RINGS:
+			case GameTheme.BG_PENDULUM:
 				shaders = new Shader[0];
 				break;
 			case GameTheme.BG_EMBERS: {
@@ -168,6 +186,10 @@ final class GameBackground extends Drawable {
 		if (w <= 0 || h <= 0) {
 			return;
 		}
+		if (t.pattern == GameTheme.BG_PENDULUM) {
+			drawCached(canvas, b, w, h);
+			return;
+		}
 		shaders(w, h);
 		canvas.save();
 		canvas.translate(b.left, b.top);
@@ -180,12 +202,250 @@ final class GameBackground extends Drawable {
 			case GameTheme.BG_RAYS: drawRays(canvas, w, h); break;
 			default: drawTowers(canvas, w, h); break;
 		}
+		drawDots(canvas, w, h);
+		canvas.restore();
+	}
+
+	private void drawDots(Canvas canvas, int w, int h) {
 		for (int i = 0; i < dots.length; i += 4) {
 			dot.setColor(t.pattern == GameTheme.BG_EMBERS && (i / 4) % 3 != 0 ? t.inkHi : t.hi);
 			dot.setAlpha((int) (Math.min(1f, dots[i + 3] * (t.pattern == GameTheme.BG_EMBERS ? 1.6f : 1f)) * 255));
 			canvas.drawCircle(dots[i] * w, dots[i + 1] * h, dots[i + 2] * density, dot);
 		}
-		canvas.restore();
+	}
+
+	/** The pendulum picture from its bitmap (drawn again only when the size changes). */
+	private void drawCached(Canvas canvas, Rect b, int w, int h) {
+		if (cache == null || cache.getWidth() != w || cache.getHeight() != h) {
+			if (cache != null) {
+				cache.recycle();
+				cache = null;
+			}
+			try {
+				cache = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+				paintPendulumScene(new Canvas(cache), w, h);
+			} catch (OutOfMemoryError e) {
+				cache = null;
+			}
+		}
+		if (cache != null) {
+			canvas.drawBitmap(cache, b.left, b.top, null);
+		} else {
+			// No memory for the bitmap: draw it every time.
+			canvas.save();
+			canvas.translate(b.left, b.top);
+			paintPendulumScene(canvas, w, h);
+			canvas.restore();
+		}
+	}
+
+	private void paintPendulumScene(Canvas c, int w, int h) {
+		if (emblem) {
+			drawEmblem(c, w, h);
+			return;
+		}
+		shaders(w, h);
+		c.drawRect(0, 0, w, h, fill);
+		c.drawRect(0, 0, w, h, glow);
+		drawField(c, w, h);
+		drawDots(c, w, h);
+	}
+
+	private static void hexagon(Path p, float cx, float cy, float r) {
+		for (int i = 0; i < 6; i++) {
+			double a = Math.PI / 3 * i;
+			float x = cx + (float) Math.cos(a) * r;
+			float y = cy + (float) Math.sin(a) * r;
+			if (i == 0) {
+				p.moveTo(x, y);
+			} else {
+				p.lineTo(x, y);
+			}
+		}
+		p.close();
+	}
+
+	/** A rod from the pivot (above the emblem) to the crystal: clear until the top edge, then fading in. */
+	private static Shader rodFade(float px, float py, float ex, float ey, int color) {
+		float edge = py < 0 && ey > py ? Math.min(0.85f, -py / (ey - py)) : 0f;
+		return new LinearGradient(px, py, ex, ey, new int[] { 0x00000000, 0x00000000, color },
+			new float[] { 0f, edge, 1f }, Shader.TileMode.CLAMP);
+	}
+
+	/** A four-pointed sparkle. */
+	private void sparkle(Canvas c, Paint p, float x, float y, float size, int color) {
+		float d = density;
+		p.setStyle(Paint.Style.STROKE);
+		p.setStrokeWidth(Math.max(1f, 0.9f * d));
+		p.setColor(color);
+		c.drawLine(x - size, y, x + size, y, p);
+		c.drawLine(x, y - size * 1.3f, x, y + size * 1.3f, p);
+		p.setColor(GameTheme.alpha(color, Math.max(0, (color >>> 24) / 2)));
+		float s2 = size * 0.4f;
+		c.drawLine(x - s2, y - s2, x + s2, y + s2, p);
+		c.drawLine(x - s2, y + s2, x + s2, y - s2, p);
+		p.setStyle(Paint.Style.FILL);
+		p.setColor(GameTheme.alpha(0xFFFFFF, Math.min(255, (color >>> 24) + 0x30)));
+		c.drawCircle(x, y, Math.max(1f, 1.1f * d), p);
+	}
+
+	/** The pendulum's crystal, its tip at (0, 0) and pointing down (+y), in dp-scaled units. */
+	private void crystal(Canvas c, Paint p, boolean main, int alpha) {
+		float d = density;
+		Path cr = new Path();
+		cr.moveTo(0, 6.4f * d);
+		cr.lineTo(11 * d, 24 * d);
+		cr.lineTo(0, 52 * d);
+		cr.lineTo(-11 * d, 24 * d);
+		cr.close();
+		if (main) {
+			p.setStyle(Paint.Style.FILL);
+			p.setAlpha(255);   // a color set before would fade the gradient
+			p.setShader(new LinearGradient(0, 6.4f * d, 0, 52 * d,
+				new int[] { GameTheme.alpha(t.hi, 0xF5), GameTheme.alpha(t.accent, 0xE6), 0xF0104A3C },
+				new float[] { 0f, 0.45f, 1f }, Shader.TileMode.CLAMP));
+			c.drawPath(cr, p);
+			p.setShader(null);
+			// Facets.
+			p.setStyle(Paint.Style.STROKE);
+			p.setStrokeWidth(Math.max(1f, 0.8f * d));
+			p.setColor(GameTheme.alpha(0xFFFFFF, 0x66));
+			c.drawLine(0, 6.4f * d, -4 * d, 28 * d, p);
+			c.drawLine(-4 * d, 28 * d, 0, 52 * d, p);
+			c.drawLine(0, 6.4f * d, 4 * d, 28 * d, p);
+			c.drawLine(4 * d, 28 * d, 0, 52 * d, p);
+			c.drawLine(-11 * d, 24 * d, -4 * d, 28 * d, p);
+			c.drawLine(11 * d, 24 * d, 4 * d, 28 * d, p);
+		}
+		p.setStyle(Paint.Style.STROKE);
+		p.setStrokeWidth(Math.max(1f, (main ? 1.2f : 0.9f) * d));
+		p.setColor(GameTheme.alpha(t.hi, alpha));
+		c.drawPath(cr, p);
+		c.drawCircle(0, 3.2f * d, 3.2f * d, p);
+	}
+
+	/**
+	 * Yu-Gi-Oh! ARC-V's background (into the cache; allocations are fine, it runs once): the
+	 * holographic field, cards, the scales' pillars and sparkles. The pendulum is the emblem.
+	 */
+	private void drawField(Canvas c, int w, int h) {
+		float d = density;
+		Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+		Random rnd = new Random(77);
+
+		// 1. The holographic field: hexagons over the bottom, fading upwards, a few of them lit.
+		float fieldTop = h * 0.58f;
+		float hr = 15 * d;
+		float hx = hr * 1.5f;
+		float hy = (float) (Math.sqrt(3) * hr);
+		Path grid = new Path();
+		p.setStyle(Paint.Style.FILL);
+		for (int col = 0; col * hx < w + hr; col++) {
+			float cx = col * hx;
+			for (float cy = fieldTop - hy + (col % 2) * hy / 2; cy < h + hy; cy += hy) {
+				hexagon(grid, cx, cy, hr);
+				if (cy > fieldTop + hy && rnd.nextFloat() < 0.07f) {
+					Path one = new Path();
+					hexagon(one, cx, cy, hr * 0.86f);
+					float k = (cy - fieldTop) / (h - fieldTop);
+					p.setColor(GameTheme.alpha(rnd.nextBoolean() ? t.ink : t.ink3, (int) (0x0C + 0x26 * k)));
+					c.drawPath(one, p);
+				}
+			}
+		}
+		p.setStyle(Paint.Style.STROKE);
+		p.setStrokeWidth(Math.max(1f, 0.8f * d));
+		p.setAlpha(255);   // a color set before would fade the gradient
+		p.setShader(new LinearGradient(0, fieldTop, 0, h,
+			new int[] { 0x00000000, GameTheme.alpha(t.ink, 0x2C), GameTheme.alpha(t.ink, 0x50) },
+			new float[] { 0f, 0.45f, 1f }, Shader.TileMode.CLAMP));
+		c.drawPath(grid, p);
+		p.setStyle(Paint.Style.FILL);
+		p.setAlpha(255);   // a color set before would fade the gradient
+		p.setShader(new LinearGradient(0, 0, w, 0,
+			new int[] { 0x00000000, GameTheme.alpha(t.inkHi, 0x60), 0x00000000 }, null, Shader.TileMode.CLAMP));
+		c.drawRect(0, fieldTop, w, fieldTop + Math.max(1f, d), p);
+		p.setShader(null);
+
+		// 2. Cards floating over the field (plain outlines: a frame, a picture box, lines of text).
+		float cw = 46 * d;
+		float ch = 66 * d;
+		float[][] cards = { { 0.15f, 0.70f, -14f, 0.95f }, { 0.87f, 0.77f, 11f, 0.8f }, { 0.55f, 0.93f, -5f, 1.1f } };
+		for (float[] cd : cards) {
+			c.save();
+			c.translate(cd[0] * w, cd[1] * h);
+			c.rotate(cd[2]);
+			c.scale(cd[3], cd[3]);
+			RectF o = new RectF(-cw / 2, -ch / 2, cw / 2, ch / 2);
+			p.setStyle(Paint.Style.FILL);
+			p.setColor(GameTheme.alpha(t.inset, 0xA0));
+			c.drawRoundRect(o, 3 * d, 3 * d, p);
+			p.setStyle(Paint.Style.STROKE);
+			p.setStrokeWidth(Math.max(1f, d));
+			p.setColor(GameTheme.alpha(t.inkHi, 0x48));
+			c.drawRoundRect(o, 3 * d, 3 * d, p);
+			float ax = -cw / 2 + 5 * d;
+			float ay = -ch / 2 + 11 * d;
+			p.setColor(GameTheme.alpha(t.ink, 0x38));
+			c.drawRect(ax, ay, cw / 2 - 5 * d, ay + cw - 10 * d, p);
+			p.setColor(GameTheme.alpha(t.inkHi, 0x38));
+			c.drawLine(ax, -ch / 2 + 6 * d, cw / 2 - 13 * d, -ch / 2 + 6 * d, p);
+			for (int k = 0; k < 2; k++) {
+				float ly = ay + cw - 10 * d + (4.5f + k * 4) * d;
+				c.drawLine(ax, ly, cw / 2 - (k == 1 ? 16 : 5) * d, ly, p);
+			}
+			c.restore();
+		}
+
+		// 3. The pillars of the pendulum scales, one on each side, with marks like a scale.
+		float pTop = h * 0.11f;
+		float pBot = h * 0.60f;
+		for (int side = 0; side < 2; side++) {
+			float x = side == 0 ? w * 0.035f : w * 0.965f;
+			p.setStyle(Paint.Style.FILL);
+			p.setAlpha(255);   // a color set before would fade the gradient
+			p.setShader(new LinearGradient(0, pTop, 0, pBot,
+				new int[] { 0x00000000, GameTheme.alpha(t.ink3, 0x48), GameTheme.alpha(t.ink3, 0x40), 0x00000000 },
+				new float[] { 0f, 0.18f, 0.8f, 1f }, Shader.TileMode.CLAMP));
+			c.drawRect(x - 6 * d, pTop, x + 6 * d, pBot, p);
+			p.setAlpha(255);   // a color set before would fade the gradient
+			p.setShader(new LinearGradient(0, pTop, 0, pBot,
+				new int[] { 0x00000000, 0xD0DDEEFF, 0x90BFE0FF, 0x00000000 },
+				new float[] { 0f, 0.15f, 0.85f, 1f }, Shader.TileMode.CLAMP));
+			c.drawRect(x - 0.75f * d, pTop, x + 0.75f * d, pBot, p);
+			p.setShader(null);
+			p.setStyle(Paint.Style.STROKE);
+			p.setStrokeWidth(Math.max(1f, 0.8f * d));
+			p.setColor(GameTheme.alpha(t.ink3, 0x80));
+			for (int k = 1; k < 8; k++) {
+				float y = pTop + (pBot - pTop) * k / 8f;
+				float len = (k % 2 == 0 ? 7 : 4) * d;
+				c.drawLine(x - len, y, x + len, y, p);
+			}
+			Path cap = new Path();
+			float cy = pTop - 7 * d;
+			cap.moveTo(x, cy - 7 * d);
+			cap.lineTo(x + 5 * d, cy);
+			cap.lineTo(x, cy + 7 * d);
+			cap.lineTo(x - 5 * d, cy);
+			cap.close();
+			p.setStyle(Paint.Style.FILL);
+			p.setColor(GameTheme.alpha(t.ink3, 0x50));
+			c.drawPath(cap, p);
+			p.setStyle(Paint.Style.STROKE);
+			p.setColor(GameTheme.alpha(t.ink3, 0xD0));
+			c.drawPath(cap, p);
+		}
+
+		// 4. Sparkles in the four colors.
+		int[] colors = { t.hi, t.ink2, t.spectrum[1], t.ink3 };
+		for (int i = 0; i < items.length; i += 4) {
+			float x = items[i] * w;
+			float y = (0.06f + items[i + 1] * 0.9f) * h;
+			float size = (3 + items[i + 2] * 5) * d;
+			int alpha = (int) (0x50 + items[i + 3] * 0x80);
+			sparkle(c, p, x, y, size, GameTheme.alpha(colors[(i / 4) % colors.length], alpha));
+		}
 	}
 
 	/** PS2: towers of light standing on a faint horizon. */
@@ -336,6 +596,123 @@ final class GameBackground extends Drawable {
 		shape.setShader(null);
 	}
 
+	/**
+	 * Yu-Gi-Oh! ARC-V's emblem above the title, on a transparent background: a pendulum of light
+	 * swinging over a rainbow arc with ticks, its trail and the ghosts of where it was.
+	 */
+	private void drawEmblem(Canvas c, int w, int h) {
+		float d = density;
+		Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+		// The arc the pendulum swings over: a sweep of colors, glowing, with ticks.
+		// Sized to the emblem: the arc spans the width and its lowest point is at the bottom.
+		float span = 44f;
+		float len = w * 0.70f;
+		float px = w * 0.5f;
+		float py = h - 8 * d - len;
+		float sx = (float) (len * Math.sin(Math.toRadians(span)));
+		RectF oval = new RectF(px - len, py - len, px + len, py + len);
+		p.setStyle(Paint.Style.STROKE);
+		p.setStrokeCap(Paint.Cap.ROUND);
+		p.setAlpha(255);   // a color set before would fade the gradient
+		p.setShader(new LinearGradient(px - sx, 0, px + sx, 0, t.spectrum, null, Shader.TileMode.CLAMP));
+		float[] widths = { 14, 5, 1.6f };
+		int[] alphas = { 0x1C, 0x40, 0xE0 };
+		for (int i = 0; i < widths.length; i++) {
+			p.setStrokeWidth(widths[i] * d);
+			p.setAlpha(alphas[i]);
+			c.drawArc(oval, 90 - span, span * 2, false, p);
+		}
+		float in = 14 * d;
+		RectF inner = new RectF(px - len + in, py - len + in, px + len - in, py + len - in);
+		p.setStrokeWidth(Math.max(1f, d));
+		p.setAlpha(0x58);
+		p.setStrokeCap(Paint.Cap.BUTT);
+		p.setPathEffect(new DashPathEffect(new float[] { 3 * d, 5 * d }, 0));
+		c.drawArc(inner, 90 - span + 3, span * 2 - 6, false, p);
+		p.setPathEffect(null);
+		p.setShader(null);
+		for (int k = 0; k <= 22; k++) {
+			double a = Math.toRadians(-span + k * span * 2 / 22);
+			boolean big = k % 11 == 0;
+			float r0 = len + 3 * d;
+			float r1 = len + (big ? 13 : k % 2 == 0 ? 8 : 5) * d;
+			float sn = (float) Math.sin(a);
+			float cs = (float) Math.cos(a);
+			p.setStrokeWidth(Math.max(1f, (big ? 1.4f : 0.9f) * d));
+			p.setColor(GameTheme.alpha(t.hi, big ? 0xB0 : 0x5C));
+			c.drawLine(px + sn * r0, py + cs * r0, px + sn * r1, py + cs * r1, p);
+		}
+
+		// The pendulum: a glowing trail along its path, ghosts of where it was, and the
+		// crystal, lit, swinging to the right.
+		float rod = len - 64 * d;
+		float now = 12f;
+		float[] ghosts = { -20f, -10f, 1f };
+		int[] ghostAlpha = { 0x16, 0x24, 0x36 };
+		RectF path = new RectF(px - rod - 26 * d, py - rod - 26 * d, px + rod + 26 * d, py + rod + 26 * d);
+		float gx0 = px + (float) Math.sin(Math.toRadians(ghosts[0])) * rod;
+		float gx1 = px + (float) Math.sin(Math.toRadians(now)) * rod;
+		p.setStrokeCap(Paint.Cap.ROUND);
+		p.setAlpha(255);   // a color set before would fade the gradient
+		p.setShader(new LinearGradient(gx0, 0, gx1, 0, 0x00000000, GameTheme.alpha(t.accent, 0x70), Shader.TileMode.CLAMP));
+		p.setStrokeWidth(10 * d);
+		c.drawArc(path, 90 - now, now - ghosts[0], false, p);
+		p.setStrokeWidth(2 * d);
+		p.setAlpha(255);   // a color set before would fade the gradient
+		p.setShader(new LinearGradient(gx0, 0, gx1, 0, 0x00000000, GameTheme.alpha(t.hi, 0xA0), Shader.TileMode.CLAMP));
+		c.drawArc(path, 90 - now, now - ghosts[0], false, p);
+		p.setShader(null);
+		p.setStrokeCap(Paint.Cap.BUTT);
+		for (int i = 0; i < ghosts.length; i++) {
+			double a = Math.toRadians(ghosts[i]);
+			float ex = px + (float) Math.sin(a) * rod;
+			float ey = py + (float) Math.cos(a) * rod;
+			p.setStyle(Paint.Style.STROKE);
+			p.setStrokeWidth(Math.max(1f, d));
+			p.setAlpha(255);
+			p.setShader(rodFade(px, py, ex, ey, GameTheme.alpha(t.hi, ghostAlpha[i])));
+			c.drawLine(px, py, ex, ey, p);
+			p.setShader(null);
+			c.save();
+			c.translate(ex, ey);
+			c.rotate(-ghosts[i]);
+			crystal(c, p, false, ghostAlpha[i]);
+			c.restore();
+		}
+		double a = Math.toRadians(now);
+		float ex = px + (float) Math.sin(a) * rod;
+		float ey = py + (float) Math.cos(a) * rod;
+		float gcx = ex + (float) Math.sin(a) * 28 * d;
+		float gcy = ey + (float) Math.cos(a) * 28 * d;
+		p.setStyle(Paint.Style.FILL);
+		p.setAlpha(255);   // a color set before would fade the gradient
+		p.setShader(new RadialGradient(gcx, gcy, 84 * d,
+			new int[] { GameTheme.alpha(t.accent, 0x70), GameTheme.alpha(t.accent, 0x1C), 0x00000000 },
+			new float[] { 0f, 0.42f, 1f }, Shader.TileMode.CLAMP));
+		c.drawCircle(gcx, gcy, 84 * d, p);
+		p.setShader(null);
+		p.setStyle(Paint.Style.STROKE);
+		p.setStrokeWidth(6 * d);
+		p.setAlpha(255);
+		p.setShader(rodFade(px, py, ex, ey, GameTheme.alpha(t.accent, 0x24)));
+		c.drawLine(px, py, ex, ey, p);
+		p.setStrokeWidth(Math.max(1f, 1.6f * d));
+		p.setShader(rodFade(px, py, ex, ey, GameTheme.alpha(t.hi, 0xD0)));
+		c.drawLine(px, py, ex, ey, p);
+		p.setShader(null);
+		c.save();
+		c.translate(ex, ey);
+		c.rotate(-now);
+		crystal(c, p, true, 0xE0);
+		sparkle(c, p, 13 * d, 14 * d, 6 * d, GameTheme.alpha(0xFFFFFF, 0xE0));
+		c.restore();
+
+		// A few sparkles around the crystal.
+		sparkle(c, p, px - w * 0.33f, py + len * 0.80f, 4 * d, GameTheme.alpha(t.ink2, 0xB0));
+		sparkle(c, p, px + w * 0.40f, py + len * 0.74f, 3.5f * d, GameTheme.alpha(t.ink3, 0xB0));
+		sparkle(c, p, px - w * 0.12f, py + len * 0.93f, 3 * d, GameTheme.alpha(t.hi, 0x90));
+	}
+
 	@Override
 	public void setAlpha(int alpha) {
 		// Always opaque.
@@ -349,6 +726,6 @@ final class GameBackground extends Drawable {
 	@Override
 	@SuppressWarnings("deprecation")
 	public int getOpacity() {
-		return PixelFormat.OPAQUE;
+		return emblem ? PixelFormat.TRANSLUCENT : PixelFormat.OPAQUE;
 	}
 }

@@ -13,6 +13,7 @@ final class GameTheme {
 	static final int BLAZBLUE = 2;
 	static final int KOF = 3;
 	static final int STREET_FIGHTER = 4;
+	static final int YUGIOH = 5;
 
 	/** Background pictures (GameBackground). */
 	static final int BG_TOWERS = 0;   // PS2: towers of light on a horizon, specks of light
@@ -20,11 +21,14 @@ final class GameTheme {
 	static final int BG_RINGS = 2;    // BlazBlue: rings of a magic seal, with ticks
 	static final int BG_EMBERS = 3;   // KOF: fire glowing from below, rising embers
 	static final int BG_RAYS = 4;     // Street Fighter Alpha: a sunburst from the top
+	static final int BG_PENDULUM = 5; // Yu-Gi-Oh! ARC-V: a pendulum of light and its arc, the
+	                                  // scales' pillars, a holographic field, cards, sparkles
 
 	/** Shape of the small light before each section's title. */
 	static final int MARK_DOT = 0;
 	static final int MARK_DIAMOND = 1;
 	static final int MARK_SQUARE = 2;
+	static final int MARK_CRYSTAL = 3;
 
 	final int id;
 
@@ -41,17 +45,27 @@ final class GameTheme {
 	int skyGlow;
 	/** The pattern's main color and its bright edge (alpha ignored). */
 	int ink, inkHi;
+	/** Second and third colors of the picture, and a sweep of colors (only some pictures). */
+	int ink2, ink3;
+	int[] spectrum;
 
 	// Letters and shapes.
 	String titleFamily;
 	int titleStyle;
 	float titleSpacing;
+	float titleSize = 30;
+	/** Height of the emblem above the title (dp), 0 for none (only BG_PENDULUM has one). */
+	float emblemHeight;
 	/** Letters of the big buttons (Play, Catalog). */
 	String buttonFamily;
 	int buttonStyle;
 	/** Corner radius of the cards, and the most a button or chip can have (dp). */
 	float cardRadius, buttonRadius;
 	int mark;
+	/** Cards drawn as panels, with corner brackets and a line of color on top (DuelFrame). */
+	boolean cardDetail;
+	/** The play button's word, when not "JUGAR". */
+	String playLabel;
 
 	private GameTheme(int id) {
 		this.id = id;
@@ -70,7 +84,7 @@ final class GameTheme {
 		return (color & 0x00FFFFFF) | (alpha << 24);
 	}
 
-	private static final GameTheme[] THEMES = { ps2(), guiltyGear(), blazBlue(), kof(), streetFighter() };
+	private static final GameTheme[] THEMES = { ps2(), guiltyGear(), blazBlue(), kof(), streetFighter(), yugioh() };
 
 	static GameTheme get(int id) {
 		return id >= 0 && id < THEMES.length ? THEMES[id] : THEMES[PS2];
@@ -264,6 +278,52 @@ final class GameTheme {
 		t.cardRadius = 6;
 		t.buttonRadius = 5;
 		t.mark = MARK_DIAMOND;
+		return t;
+	}
+
+	/**
+	 * Yu-Gi-Oh! ARC-V Tag Force Special: emerald light on a night-teal field, a pendulum swinging
+	 * over a rainbow arc, panels like a duel's, buttons that go from orange to green like a
+	 * pendulum card's frame, serif letters like card names, and "DUELO" to start.
+	 */
+	private static GameTheme yugioh() {
+		GameTheme t = new GameTheme(YUGIOH);
+		t.bg = 0xFF02080B;
+		t.card = 0x7306141C;
+		t.stroke = 0x4434B892;
+		t.accent = 0xFF3DF2B0;
+		t.hi = 0xFFC8FFEA;
+		t.text = 0xFFEEFBF6;
+		t.muted = 0xFF8DAAA2;
+		t.section = 0xFFBFEBDD;
+		t.chipStroke = 0x5531A985;
+		t.glow = 0x993DF2B0;
+		t.track = 0xFF183A34;
+		t.inset = 0xFF04110F;
+		t.glassTop = 0xFFE8842C;
+		t.glassMid = 0xFF6E8E3A;
+		t.glassBottom = 0xFF137A58;
+		t.glassEdge = 0xFFB8FFE4;
+		t.pattern = BG_PENDULUM;
+		t.sky = new int[] { 0xFF0B2633, 0xFF061822, 0xFF030A0F, 0xFF000000 };
+		t.skyGlow = 0xFF139C86;
+		t.ink = 0xFF3DF2B0;
+		t.inkHi = 0xFFB8FFE6;
+		t.ink2 = 0xFFFF4D6D;
+		t.ink3 = 0xFF4FA8FF;
+		t.spectrum = new int[] { 0xFFFF4D6D, 0xFFFFB347, 0xFF3DF2B0, 0xFF4FA8FF };
+		t.titleFamily = "serif";
+		t.titleStyle = Typeface.BOLD;
+		t.titleSpacing = 0.03f;
+		t.titleSize = 25;
+		t.emblemHeight = 132;
+		t.buttonFamily = "serif";
+		t.buttonStyle = Typeface.BOLD;
+		t.cardRadius = 6;
+		t.buttonRadius = 4;
+		t.mark = MARK_CRYSTAL;
+		t.cardDetail = true;
+		t.playLabel = "DUELO";
 		return t;
 	}
 }

@@ -22,7 +22,7 @@ final class GameInspector {
 
 	static final int SECTOR = 2048;
 
-	enum Match { TARGET, BLAZBLUE, KOF, STREET_FIGHTER, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
+	enum Match { TARGET, BLAZBLUE, KOF, STREET_FIGHTER, YUGIOH_ARCV, OTHER_GUILTY_GEAR, OTHER_GAME, UNKNOWN }
 
 	/** Games with their own controls in the app. */
 	static final int KIND_GG = 0;
@@ -73,6 +73,25 @@ final class GameInspector {
 		return t.contains("KING OF FIGHTERS") || t.contains("KOF");
 	}
 
+	/**
+	 * Yu-Gi-Oh! ARC-V Tag Force Special (Japan, PSN NPJH-00142), also with the English fan
+	 * translation (its title says so) and from a UMD dump with another ID.
+	 */
+	static boolean isYugiohArcV(String discId, String title) {
+		if (discId != null) {
+			String id = discId.replace("-", "").replace(" ", "").toUpperCase(Locale.ROOT);
+			if (id.equals("NPJH00142")) {
+				return true;
+			}
+		}
+		if (title == null) {
+			return false;
+		}
+		String t = title.toUpperCase(Locale.ROOT);
+		return t.contains("TAG FORCE SPECIAL")
+			|| (t.contains("ARC-V") && (t.contains("TAG FORCE") || t.contains("YU-GI-OH") || t.contains("遊☆戯☆王")));
+	}
+
 	/** BlazBlue: Calamity Trigger (US, EU, JP) and Continuum Shift II (US, EU, JP, Asia). */
 	private static final String[] BLAZBLUE_IDS = { "ULUS10519", "ULES01497", "ULJM05613", "ULUS10579", "ULES01526", "ULJM05850", "UCAS40337" };
 
@@ -100,6 +119,9 @@ final class GameInspector {
 		}
 
 		Match match() {
+			if (isYugiohArcV(discId, title)) {
+				return Match.YUGIOH_ARCV;
+			}
 			if (isBlazBlue(discId, title)) {
 				return Match.BLAZBLUE;
 			}

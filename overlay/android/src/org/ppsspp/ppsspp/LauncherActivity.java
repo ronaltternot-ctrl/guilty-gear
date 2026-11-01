@@ -1440,6 +1440,11 @@ public class LauncherActivity extends Activity {
 				gameStatus.setTextColor(C_OK);
 				detail.append("\nKOF: botones Neo Geo A, B, C y D, gestos, HUD propio, perfiles por personaje ('96–'98) y efectos listos. El visor de hitboxes es solo de Guilty Gear.");
 				break;
+			case YUGIOH_ARCV:
+				gameStatus.setText("✓ " + r.title);
+				gameStatus.setTextColor(C_OK);
+				detail.append("\nYu-Gi-Oh! ARC-V Tag Force Special: juego de cartas con su propio estilo de menú. Los botones de PSP (estilo «Consola») son los más cómodos; los perfiles por personaje y el visor de hitboxes son de los juegos de pelea.");
+				break;
 			case OTHER_GUILTY_GEAR:
 				gameStatus.setText("⚠ Otro Guilty Gear: " + r.title);
 				gameStatus.setTextColor(C_WARN);
@@ -1482,8 +1487,15 @@ public class LauncherActivity extends Activity {
 		return gameKind() == GameInspector.KIND_SF;
 	}
 
+	private boolean isYugioh() {
+		return GameInspector.isYugiohArcV(prefs.getString(K_ID, null), prefs.getString(K_TITLE, null));
+	}
+
 	/** Short name for messages ("Guilty Gear XX ΛC+", "BlazBlue", "KOF"). */
 	private String gameShortName() {
+		if (isYugioh()) {
+			return "Yu-Gi-Oh! ARC-V Tag Force Special";
+		}
 		return isBlazBlue() ? "BlazBlue" : isKof() ? "The King of Fighters" : isStreetFighter() ? "Street Fighter Alpha 3" : "Guilty Gear XX ΛC+";
 	}
 
@@ -1491,7 +1503,11 @@ public class LauncherActivity extends Activity {
 		if (headerKicker == null) {
 			return;
 		}
-		if (isBlazBlue()) {
+		if (isYugioh()) {
+			headerKicker.setText("YU-GI-OH! ARC-V");
+			headerTitle.setText("TAG FORCE SPECIAL");
+			headerSubtitle.setText("Edición PSP · duelos de cartas en GBS++");
+		} else if (isBlazBlue()) {
 			String t = prefs.getString(K_TITLE, "");
 			boolean cs = t != null && t.toUpperCase(Locale.ROOT).contains("CONTINUUM");
 			headerKicker.setText("BLAZBLUE");
@@ -1541,6 +1557,8 @@ public class LauncherActivity extends Activity {
 				return GameTheme.KOF;
 			case STREET_FIGHTER:
 				return GameTheme.STREET_FIGHTER;
+			case YUGIOH_ARCV:
+				return GameTheme.YUGIOH;
 			default:
 				return GameTheme.PS2;
 		}
@@ -1919,7 +1937,7 @@ public class LauncherActivity extends Activity {
 			for (int b : GameCatalog.BADGE_ORDER) {
 				if (counts[b] > 0) {
 					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF"
-						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : b == GameCatalog.BADGE_DC ? "Dreamcast" : "Otros") + " · " + counts[b]);
+						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : b == GameCatalog.BADGE_DC ? "Dreamcast" : b == GameCatalog.BADGE_YGO ? "Yu-Gi-Oh!" : "Otros") + " · " + counts[b]);
 				}
 			}
 			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -4583,7 +4601,7 @@ public class LauncherActivity extends Activity {
 		} else if (prefs.getString(K_URI, null) == null) {
 			playButton.setText("ELEGIR JUEGO");
 		} else {
-			playButton.setText("JUGAR");
+			playButton.setText(theme.playLabel != null ? theme.playLabel : "JUGAR");
 		}
 	}
 
@@ -4614,12 +4632,17 @@ public class LauncherActivity extends Activity {
 		int width = screenDp > 680 ? dp(640) : ViewGroup.LayoutParams.MATCH_PARENT;
 		center.addView(col, new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
-		// Header
+		// Header (some games have an emblem above it, like a title screen)
+		if (theme.emblemHeight > 0) {
+			View emblem = new View(this);
+			emblem.setBackground(new GameBackground(theme, getResources().getDisplayMetrics().density, true));
+			col.addView(emblem, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(theme.emblemHeight)));
+		}
 		headerKicker = text("GUILTY GEAR XX", 12, C_ACCENT, false);
 		headerKicker.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
 		headerKicker.setLetterSpacing(0.45f);
 		col.addView(headerKicker);
-		headerTitle = text("ΛCORE PLUS", 30, C_TEXT, false);
+		headerTitle = text("ΛCORE PLUS", theme.titleSize, C_TEXT, false);
 		headerTitle.setTypeface(theme.titleTypeface());
 		headerTitle.setLetterSpacing(theme.titleSpacing);
 		headerTitle.setShadowLayer(dp(10), 0, 0, C_GLOW);
@@ -5492,8 +5515,9 @@ public class LauncherActivity extends Activity {
 		if (theme.mark == GameTheme.MARK_DIAMOND) {
 			light.setRotation(45f);
 		}
-		light.setBackground(orb);
-		LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(6), dp(6));
+		boolean crystal = theme.mark == GameTheme.MARK_CRYSTAL;
+		light.setBackground(crystal ? new DuelFrame.Crystal(C_HI, C_ACCENT) : orb);
+		LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(crystal ? 7 : 6), dp(crystal ? 11 : 6));
 		orbLp.rightMargin = dp(12);
 		header.addView(light, orbLp);
 		TextView label = text(title, 13, C_SECTION, false);
@@ -5528,6 +5552,10 @@ public class LauncherActivity extends Activity {
 		LinearLayout card = new LinearLayout(this);
 		card.setOrientation(LinearLayout.VERTICAL);
 		card.setPadding(dp(16), dp(16), dp(16), dp(16));
+		if (theme.cardDetail) {
+			card.setBackground(new DuelFrame(theme, getResources().getDisplayMetrics().density, C_CARD, strokeColor));
+			return card;
+		}
 		GradientDrawable bg = new GradientDrawable();
 		bg.setColor(C_CARD);
 		bg.setCornerRadius(dp(theme.cardRadius));
