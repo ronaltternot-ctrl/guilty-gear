@@ -37,6 +37,12 @@ final class TouchPadView extends View {
 		void onKey(int code, boolean down);
 
 		void onMenu();
+
+		/**
+		 * The joystick as an analog stick (setAnalog): x and y from -1 to 1, on every move and 0, 0
+		 * when let go. Only for games that read a stick (Nintendo 64).
+		 */
+		default void onAnalog(float x, float y) {}
 	}
 
 	/** One button: its label, color and the keys it holds down. */
@@ -72,11 +78,16 @@ final class TouchPadView extends View {
 	// PlayStation layout: four face buttons in a diamond, shoulder buttons in the top corners.
 	private Spec[] diamond;            // top, left, right, bottom; null for the rows layout
 	private Spec[] leftShoulders = new Spec[0], rightShoulders = new Spec[0];
+	// Nintendo 64 layout: A and B, the four C buttons in a small diamond above them.
+	private Spec[] n64;                // A, B, C up, C left, C right, C down; null otherwise
 	private final SparseArray<Integer> pointers = new SparseArray<>();
 	private final Map<Integer, Integer> held = new HashMap<>();
 	private Listener listener;
 
 	private boolean stick;
+	/** The joystick sends its position (onAnalog), not eight directions. */
+	private boolean analog;
+	private float lastAx, lastAy;
 	private int sizePercent = 100;
 	private float opacity = 0.85f;
 	private boolean haptics = true;
@@ -109,6 +120,7 @@ final class TouchPadView extends View {
 	void setButtons(Spec[] topRow, Spec[] bottomRow, Spec[] shortcutRow, Spec[] systemRow) {
 		releaseAll();
 		diamond = null;
+		n64 = null;
 		leftShoulders = rightShoulders = new Spec[0];
 		top = topRow;
 		bottom = bottomRow;
@@ -121,7 +133,24 @@ final class TouchPadView extends View {
 	/** PlayStation style: face buttons in a diamond, L / R buttons in the top corners. */
 	void setDiamond(Spec topButton, Spec leftButton, Spec rightButton, Spec bottomButton, Spec[] left, Spec[] right, Spec[] systemRow) {
 		releaseAll();
+		n64 = null;
 		diamond = new Spec[] { topButton, leftButton, rightButton, bottomButton };
+		leftShoulders = left;
+		rightShoulders = right;
+		top = bottom = shortcuts = new Spec[0];
+		system = systemRow;
+		layoutButtons();
+		invalidate();
+	}
+
+	/**
+	 * Nintendo 64 style: big A and B, the C buttons (up, left, right, down) in a small diamond above
+	 * them, Z / L and R along the top edge. The joystick is an analog stick.
+	 */
+	void setN64(Spec a, Spec b, Spec[] cButtons, Spec[] left, Spec[] right, Spec[] systemRow) {
+		releaseAll();
+		diamond = null;
+		n64 = new Spec[] { a, b, cButtons[0], cButtons[1], cButtons[2], cButtons[3] };
 		leftShoulders = left;
 		rightShoulders = right;
 		top = bottom = shortcuts = new Spec[0];
@@ -132,6 +161,15 @@ final class TouchPadView extends View {
 
 	void setStick(boolean stick) {
 		this.stick = stick;
+		invalidate();
+	}
+
+	/** An analog stick (onAnalog) instead of eight directions; it's drawn as a joystick. */
+	void setAnalog(boolean analog) {
+		this.analog = analog;
+		if (analog) {
+			stick = true;
+		}
 		invalidate();
 	}
 
@@ -164,6 +202,7 @@ final class TouchPadView extends View {
 		held.clear();
 		moveId = -1;
 		setDirection(0, 0);
+		sendAnalog(0, 0);
 		invalidate();
 	}
 
@@ -210,6 +249,33 @@ final class TouchPadView extends View {
 			// Shoulder buttons along the top edge, 1 nearest the corners.
 			final float sh = 0.7f * d;
 			final float ys = m + sh / 2f + 0.03f * h;
+			for (int i = 0; i < leftShoulders.length; i++) {
+				add(leftShoulders[i], KIND_SHORTCUT, m + sh / 2f + 0.02f * w + i * 1.2f * sh, ys, sh / 2f);
+			}
+			for (int i = 0; i < rightShoulders.length; i++) {
+				add(rightShoulders[i], KIND_SHORTCUT, w - m - sh / 2f - 0.02f * w - i * 1.2f * sh, ys, sh / 2f);
+			}
+		}
+		if (n64 != null) {
+			// A at the bottom right, B up and to its left (as on the controller), the C buttons
+			// in a small diamond above them.
+			final float fd = 0.95f * d;
+			final float ax = w - m - fd / 2f - 0.02f * w, ay = h - m - fd / 2f;
+			final float bx = ax - 1.05f * fd, by = ay - 0.55f * fd;
+			add(n64[0], KIND_MAIN, ax, ay, fd / 2f);
+			add(n64[1], KIND_MAIN, bx, by, fd / 2f);
+			final float sh = 0.7f * d;
+			final float ys = m + sh / 2f + 0.03f * h;
+			// The diamond fits between the R button and B: smaller C buttons when the buttons are big.
+			final float room = (by - fd / 2f) - (ys + sh / 2f) - 0.035f * h;
+			final float cs = Math.min(0.6f * d, room / 3.1f);
+			final float cr = 1.05f * cs;
+			final float cx = w - m - cs / 2f - cr - 0.02f * w;
+			final float cy = by - fd / 2f - 0.015f * h - cr - cs / 2f;
+			add(n64[2], KIND_SHORTCUT, cx, cy - cr, cs / 2f);
+			add(n64[3], KIND_SHORTCUT, cx - cr, cy, cs / 2f);
+			add(n64[4], KIND_SHORTCUT, cx + cr, cy, cs / 2f);
+			add(n64[5], KIND_SHORTCUT, cx, cy + cr, cs / 2f);
 			for (int i = 0; i < leftShoulders.length; i++) {
 				add(leftShoulders[i], KIND_SHORTCUT, m + sh / 2f + 0.02f * w + i * 1.2f * sh, ys, sh / 2f);
 			}
@@ -355,6 +421,7 @@ final class TouchPadView extends View {
 			headX = moveX;
 			headY = moveY;
 			setDirection(0, 0);
+			sendAnalog(0, 0);
 			invalidate();
 			return;
 		}
@@ -411,6 +478,16 @@ final class TouchPadView extends View {
 			headX = x;
 			headY = y;
 		}
+		if (analog) {
+			// Where the head is, from -1 to 1 on each axis, with a small dead zone in the middle.
+			float ax = (headX - moveX) / lim, ay = (headY - moveY) / lim;
+			if (dist < lim * 0.08f) {
+				ax = ay = 0;
+			}
+			sendAnalog(ax, ay);
+			invalidate();
+			return;
+		}
 		int nx = 0, ny = 0;
 		if (dist > moveR * 0.28f) {
 			// Eight sectors: a component counts beyond 22.5 degrees from the other axis.
@@ -419,6 +496,17 @@ final class TouchPadView extends View {
 		}
 		setDirection(nx, ny);
 		invalidate();
+	}
+
+	private void sendAnalog(float x, float y) {
+		if (!analog || (x == lastAx && y == lastAy)) {
+			return;
+		}
+		lastAx = x;
+		lastAy = y;
+		if (listener != null) {
+			listener.onAnalog(x, y);
+		}
 	}
 
 	private void setDirection(int x, int y) {
@@ -532,7 +620,7 @@ final class TouchPadView extends View {
 		for (int i = 0; i < 8; i++) {
 			double a = Math.PI / 4 * i;
 			int sx = (int) Math.round(Math.cos(a)), sy = (int) Math.round(Math.sin(a));
-			boolean on = sx == dirX && sy == dirY && (dirX != 0 || dirY != 0);
+			boolean on = !analog && sx == dirX && sy == dirY && (dirX != 0 || dirY != 0);
 			fill.setColor(alpha(0xFFFFFFFF, on ? 0.9f : 0.3f));
 			c.drawCircle(moveX + (float) Math.cos(a) * moveR * 0.82f, moveY + (float) Math.sin(a) * moveR * 0.82f, moveR * (on ? 0.07f : 0.045f), fill);
 		}

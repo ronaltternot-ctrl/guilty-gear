@@ -23,6 +23,7 @@ final class GameTheme {
 	static final int PSX = 7;
 	static final int DREAMCAST = 8;
 	static final int MUGEN = 9;
+	static final int N64 = 10;
 
 	/** Background pictures (GameBackground). */
 	static final int BG_TOWERS = 0;   // PS2: towers of light on a horizon, specks of light
@@ -129,7 +130,7 @@ final class GameTheme {
 	}
 
 	private static final GameTheme[] THEMES = { ps2(), guiltyGear(), blazBlue(), kof(), streetFighter(), yugioh(),
-		arcade(), psx(), dreamcast(), mugen() };
+		arcade(), psx(), dreamcast(), mugen(), n64() };
 
 	static GameTheme get(int id) {
 		return id >= 0 && id < THEMES.length ? THEMES[id] : THEMES[PS2];
@@ -501,6 +502,25 @@ final class GameTheme {
 		t.titleSpacing = 0.03f;
 		t.cardRadius = 3;
 		t.buttonRadius = 2;
+		t.mark = MARK_DIAMOND;
+		return t;
+	}
+
+	/** Nintendo 64: green light on deep green-black, a sunburst, heavy slanted letters. */
+	private static GameTheme n64() {
+		GameTheme t = tinted(N64, 0xFF33C35A, BG_RAYS);
+		t.sky = new int[] { 0xFF0B2414, 0xFF06150B, 0xFF030A05, 0xFF000000 };
+		t.inkHi = 0xFFB6FFC9;
+		t.skyGlow = 0xFF1F8A3A;
+		t.titleFamily = "sans-serif-black";
+		t.titleStyle = Typeface.ITALIC;
+		t.buttonFamily = "sans-serif-black";
+		t.buttonStyle = Typeface.ITALIC;
+		t.titleAsset = "Inter-BlackItalic.otf";
+		t.buttonAsset = "Inter-BlackItalic.otf";
+		t.titleSpacing = 0.03f;
+		t.cardRadius = 8;
+		t.buttonRadius = 6;
 		t.mark = MARK_DIAMOND;
 		return t;
 	}

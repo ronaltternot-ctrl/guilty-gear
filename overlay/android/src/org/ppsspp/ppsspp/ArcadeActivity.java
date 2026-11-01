@@ -55,7 +55,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 
 	static final String EXTRA_ROM = "rom";
 	static final String EXTRA_TITLE = "title";
-	/** ArcadeLibrary.SYSTEM (default) or PsxLibrary.SYSTEM. */
+	/** ArcadeLibrary.SYSTEM (default), PsxLibrary.SYSTEM, DreamcastLibrary.SYSTEM or N64Library.SYSTEM. */
 	static final String EXTRA_SYSTEM = "system";
 
 	private static final String CORE = "libfbneo_libretro_android.so";
@@ -72,6 +72,22 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	static final String[] DC_RES_NAMES = { "640 × 480 (original)", "1280 × 960 (×2)", "1920 × 1440 (×3)" };
 	static final String[] DC_TEX = { "1", "2", "4" };
 	static final String[] DC_TEX_NAMES = { "originales", "xBRZ ×2", "xBRZ ×4" };
+
+	/** Mupen64Plus-Next with GLideN64 on OpenGL ES 3 (Lemuroid's build). */
+	private static final String CORE_N64 = "libmupen64plus_next_gles3_libretro_android.so";
+	// Nintendo 64 pad on the core's standard RetroPad: A = B, B = Y, Z = L2, L = L, R = R,
+	// the stick is the left analog stick and the C buttons the right one.
+	private static final int N64_A = KeyEvent.KEYCODE_BUTTON_B, N64_B = KeyEvent.KEYCODE_BUTTON_Y;
+	private static final int N64_Z = KeyEvent.KEYCODE_BUTTON_L2, N64_L = KeyEvent.KEYCODE_BUTTON_L1, N64_R = KeyEvent.KEYCODE_BUTTON_R1;
+	/** The C buttons, kept here and sent as the right stick (not Android keys). */
+	private static final int N64_C_UP = -101, N64_C_LEFT = -102, N64_C_RIGHT = -103, N64_C_DOWN = -104;
+	private static final int C_N64_A = 0xFF4F7BFF, C_N64_B = 0xFF3FD27A, C_N64_C = 0xFFFFD23F, C_N64_START = 0xFFFF5A5A;
+	/** GLideN64's output size (4:3 and, with the wide screen, 16:9): the N64 draws at 320 x 240. */
+	static final String[] N64_RES = { "320x240", "640x480", "960x720", "1280x960" };
+	static final String[] N64_RES_WIDE = { "640x360", "960x540", "1280x720", "1920x1080" };
+	static final String[] N64_RES_NAMES = { "320 × 240 (original)", "640 × 480 (×2)", "960 × 720 (×3)", "1280 × 960 (×4)" };
+	/** GLideN64's texture enhancement: xBRZ, like the Dreamcast's. */
+	static final String[] N64_TEX = { "None", "2xBRZ", "4xBRZ" };
 
 	// PlayStation: the RetroPad is the PlayStation pad (✕ = B, ○ = A, □ = Y, △ = X).
 	private static final int PS_CROSS = KeyEvent.KEYCODE_BUTTON_B, PS_CIRCLE = KeyEvent.KEYCODE_BUTTON_A;
@@ -107,6 +123,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private boolean psx;
 	/** Dreamcast (Flycast). */
 	private boolean dc;
+	/** Nintendo 64 (Mupen64Plus-Next). */
+	private boolean n64;
+	private boolean cUp, cLeft, cRight, cDown;
 	/** ArcadeLibrary.SYSTEM, PsxLibrary.SYSTEM or DreamcastLibrary.SYSTEM: also the prefs and folder name. */
 	private String system;
 	/** An arcade set of SNK's Neo Geo (four buttons, MVS / AES). */
@@ -124,7 +143,8 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		String sys = getIntent().getStringExtra(EXTRA_SYSTEM);
 		psx = PsxLibrary.SYSTEM.equals(sys);
 		dc = DreamcastLibrary.SYSTEM.equals(sys);
-		system = psx ? PsxLibrary.SYSTEM : dc ? DreamcastLibrary.SYSTEM : ArcadeLibrary.SYSTEM;
+		n64 = N64Library.SYSTEM.equals(sys);
+		system = psx ? PsxLibrary.SYSTEM : dc ? DreamcastLibrary.SYSTEM : n64 ? N64Library.SYSTEM : ArcadeLibrary.SYSTEM;
 		prefs = getSharedPreferences(system, MODE_PRIVATE);
 
 		FrameLayout root = new FrameLayout(this);
@@ -142,13 +162,14 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		}
 		rom = new File(path);
 		// The name saves and states go by: the ROM set, or the PS1 game's folder.
-		set = psx || dc ? rom.getParentFile().getName().replaceAll("[^A-Za-z0-9._()\\-]", "_") : ArcadeLibrary.setName(rom.getName());
+		set = psx || dc || n64 ? rom.getParentFile().getName().replaceAll("[^A-Za-z0-9._()\\-]", "_") : ArcadeLibrary.setName(rom.getName());
 		if (title == null || title.isEmpty()) {
-			title = psx ? PsxLibrary.title(rom.getName()) : dc ? DreamcastLibrary.title(rom.getName()) : ArcadeCheck.title(this, set);
+			title = psx ? PsxLibrary.title(rom.getName()) : dc ? DreamcastLibrary.title(rom.getName())
+				: n64 ? N64Library.title(rom.getName()) : ArcadeCheck.title(this, set);
 		}
 		GameRun.begin(this, ":arcade", title, rom.getName() + " (" + (rom.length() / 1048576) + " MB)");
-		neoGeo = !psx && !dc && (ArcadeCheck.info(this, set) != null || ArcadeLibrary.looksNeoGeo(set));
-		String musicSystem = psx ? MusicPlayer.PSX : dc ? MusicPlayer.DC : MusicPlayer.ARCADE;
+		neoGeo = !psx && !dc && !n64 && (ArcadeCheck.info(this, set) != null || ArcadeLibrary.looksNeoGeo(set));
+		String musicSystem = psx ? MusicPlayer.PSX : dc ? MusicPlayer.DC : n64 ? MusicPlayer.N64 : MusicPlayer.ARCADE;
 		music = MusicPlayer.create(this, musicSystem);
 		muteGame = music != null && MusicPlayer.mutesAllSound(this, musicSystem);
 		File base = new File(getFilesDir(), system);
@@ -161,7 +182,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			}
 		}
 
-		String coreName = psx ? CORE_PSX : dc ? CORE_DC : CORE;
+		String coreName = psx ? CORE_PSX : dc ? CORE_DC : n64 ? CORE_N64 : CORE;
 		File coreFile = new File(getApplicationInfo().nativeLibraryDir, coreName);
 		GLRetroViewData data = new GLRetroViewData(this);
 		data.setCoreFilePath(coreFile.isFile() ? coreFile.getAbsolutePath() : coreName);
@@ -210,7 +231,31 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		}), GlobalScope.INSTANCE);
 	}
 
+	private int n64Res() {
+		return Math.max(0, java.util.Arrays.asList(N64_RES).indexOf(prefs.getString("n64_res", N64_RES[1])));
+	}
+
 	private Variable[] variables() {
+		if (n64) {
+			int res = n64Res();
+			return new Variable[] {
+				new Variable("mupen64plus-rdp-plugin", "gliden64", null),
+				new Variable("mupen64plus-rsp-plugin", "hle", null),
+				new Variable("mupen64plus-cpucore", "dynamic_recompiler", null),
+				// The resolution: GLideN64 draws the game this big (4:3, or 16:9 with the wide screen).
+				new Variable("mupen64plus-EnableNativeResFactor", "0", null),
+				new Variable("mupen64plus-43screensize", N64_RES[res], null),
+				new Variable("mupen64plus-169screensize", N64_RES_WIDE[res], null),
+				new Variable("mupen64plus-aspect", prefs.getBoolean("n64_wide", false) ? "16:9 adjusted" : "4:3", null),
+				// xBRZ on the game's textures: the N64's own "texture changes".
+				new Variable("mupen64plus-txEnhancementMode", prefs.getString("n64_tex", N64_TEX[0]), null),
+				new Variable("mupen64plus-txFilterMode", "None", null),
+				new Variable("mupen64plus-FrameDuping", "True", null),
+				// Standard controls: C buttons on the right stick (a Bluetooth controller's too).
+				new Variable("mupen64plus-alt-map", "False", null),
+				new Variable("mupen64plus-pak1", "memory", null),
+			};
+		}
 		if (dc) {
 			return new Variable[] {
 				// Without dc_boot.bin in system/dc, Flycast boots with its own BIOS (HLE) by itself.
@@ -261,7 +306,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			int w = Math.max(dm.widthPixels, dm.heightPixels);
 			int h = Math.min(dm.widthPixels, dm.heightPixels);
 			// The Dreamcast's frame is 640 x 480 (or more), twice the size the scale is worked out for.
-			chain = RetroEffects.chain(this, id, dc ? RetroEffects.fsrScale(w / 2, h / 2) : RetroEffects.fsrScale(w, h));
+			// The N64's frame is 320 x 240 times the resolution chosen.
+			int k = dc ? 2 : n64 ? n64Res() + 1 : 1;
+			chain = RetroEffects.chain(this, id, RetroEffects.fsrScale(w / k, h / k));
 		}
 		if (chain == null) {
 			retro.setShader(ShaderConfig.Sharp.INSTANCE);
@@ -283,6 +330,25 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private void applyPadSettings() {
+		if (n64) {
+			pad.setN64(
+				new TouchPadView.Spec("A", C_N64_A, N64_A),
+				new TouchPadView.Spec("B", C_N64_B, N64_B),
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("▲", C_N64_C, N64_C_UP),
+					new TouchPadView.Spec("◀", C_N64_C, N64_C_LEFT),
+					new TouchPadView.Spec("▶", C_N64_C, N64_C_RIGHT),
+					new TouchPadView.Spec("▼", C_N64_C, N64_C_DOWN),
+				},
+				new TouchPadView.Spec[] { new TouchPadView.Spec("Z", C_SHORT, N64_Z), new TouchPadView.Spec("L", C_SHORT, N64_L) },
+				new TouchPadView.Spec[] { new TouchPadView.Spec("R", C_SHORT, N64_R) },
+				new TouchPadView.Spec[] { new TouchPadView.Spec("START", C_N64_START, KEY_START) });
+			pad.setAnalog(true);
+			pad.setSizePercent(prefs.getInt("size", 100));
+			pad.setOpacity(prefs.getFloat("opacity", 0.85f));
+			pad.setVisibility(prefs.getBoolean("hide_pad", false) ? View.GONE : View.VISIBLE);
+			return;
+		}
 		if (dc) {
 			pad.setDiamond(
 				new TouchPadView.Spec("Y", C_DC_Y, DC_Y),
@@ -357,7 +423,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 
 	/** Six buttons (Capcom) or four (Neo Geo and the rest), per game; Capcom's fighting games start with six. */
 	private boolean sixButtons() {
-		return !psx && !dc && !neoGeo && "six".equals(prefs.getString("buttons_" + set, ArcadeLibrary.looksSixButton(set) ? "six" : "four"));
+		return !psx && !dc && !n64 && !neoGeo && "six".equals(prefs.getString("buttons_" + set, ArcadeLibrary.looksSixButton(set) ? "six" : "four"));
 	}
 
 	private void onFirstFrame() {
@@ -403,7 +469,14 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		GameRun.step(this, "error " + code + " del emulador");
 		String msg;
 		if (code == GLRetroView.ERROR_LOAD_LIBRARY) {
-			msg = "No se pudo cargar el emulador " + (psx ? "de PS1 (PCSX ReARMed)" : dc ? "de Dreamcast (Flycast)" : "FBNeo") + " en este teléfono.";
+			msg = "No se pudo cargar el emulador " + (psx ? "de PS1 (PCSX ReARMed)" : dc ? "de Dreamcast (Flycast)"
+				: n64 ? "de Nintendo 64 (Mupen64Plus-Next)" : "FBNeo") + " en este teléfono.";
+		} else if (code == GLRetroView.ERROR_LOAD_GAME && n64) {
+			msg = "El emulador de Nintendo 64 no pudo abrir «" + rom.getName() + "».\n\n"
+				+ "• Formatos que abre: .z64, .n64 y .v64 (o un .zip / .7z con uno de ellos).\n"
+				+ "• El archivo puede estar incompleto o dañado: vuelve a añadirlo.";
+		} else if (code == GLRetroView.ERROR_GL_NOT_COMPATIBLE && n64) {
+			msg = "La GPU de este teléfono no tiene lo que pide el emulador de Nintendo 64 (OpenGL ES 3).";
 		} else if (code == GLRetroView.ERROR_LOAD_GAME && dc) {
 			msg = "El emulador de Dreamcast no pudo abrir «" + rom.getName() + "».\n\n"
 				+ "• Si es un .gdi, tienen que estar todas sus pistas (track01.bin, track02.raw…): añade el .zip o .7z del juego entero.\n"
@@ -457,7 +530,36 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	@Override
+	public void onAnalog(float x, float y) {
+		if (retro != null) {
+			retro.sendMotionEvent(GLRetroView.MOTION_SOURCE_ANALOG_LEFT, x, y, 0);
+		}
+	}
+
+	/** The N64's C buttons as the right stick: each pair (up / down, left / right) is one axis. */
+	private void sendCButtons() {
+		if (retro != null) {
+			float x = (cRight ? 1f : 0f) - (cLeft ? 1f : 0f);
+			float y = (cDown ? 1f : 0f) - (cUp ? 1f : 0f);
+			retro.sendMotionEvent(GLRetroView.MOTION_SOURCE_ANALOG_RIGHT, x, y, 0);
+		}
+	}
+
+	@Override
 	public void onKey(int code, boolean down) {
+		if (code <= N64_C_UP && code >= N64_C_DOWN) {
+			if (code == N64_C_UP) {
+				cUp = down;
+			} else if (code == N64_C_LEFT) {
+				cLeft = down;
+			} else if (code == N64_C_RIGHT) {
+				cRight = down;
+			} else {
+				cDown = down;
+			}
+			sendCButtons();
+			return;
+		}
 		if (retro != null) {
 			retro.sendKeyEvent(down ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP, code, 0);
 		}
@@ -539,13 +641,16 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			}
 			return true;
 		});
-		labels.add("🕹  Movimiento: " + (stick ? "joystick" : "flechas"));
-		actions.add(() -> {
-			prefs.edit().putString("move", stick ? "dpad" : "stick").apply();
-			applyPadSettings();
-			return true;
-		});
-		if (!psx && !dc && !neoGeo) {
+		if (!n64) {
+			// (The N64 moves with its analog stick.)
+			labels.add("🕹  Movimiento: " + (stick ? "joystick" : "flechas"));
+			actions.add(() -> {
+				prefs.edit().putString("move", stick ? "dpad" : "stick").apply();
+				applyPadSettings();
+				return true;
+			});
+		}
+		if (!psx && !dc && !n64 && !neoGeo) {
 			labels.add("🔘  Botones: " + (six ? "6 (LP MP HP / LK MK HK, Capcom)" : "4 (A B C D)"));
 			actions.add(() -> {
 				prefs.edit().putString("buttons_" + set, six ? "four" : "six").apply();
@@ -573,7 +678,33 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			pickShader();
 			return false;
 		});
-		if (dc) {
+		if (n64) {
+			final int res = n64Res();
+			final int tex = Math.max(0, java.util.Arrays.asList(N64_TEX).indexOf(prefs.getString("n64_tex", N64_TEX[0])));
+			final boolean wide = prefs.getBoolean("n64_wide", false);
+			labels.add("✨  Resolución: " + N64_RES_NAMES[res]);
+			actions.add(() -> {
+				int next = (res + 1) % N64_RES.length;
+				prefs.edit().putString("n64_res", N64_RES[next]).apply();
+				Toast.makeText(this, "Resolución " + N64_RES_NAMES[next] + ": se aplica la próxima vez que abras el juego. Si va lento, bájala.", Toast.LENGTH_LONG).show();
+				return true;
+			});
+			labels.add("🧩  Texturas: " + DC_TEX_NAMES[tex]);
+			actions.add(() -> {
+				int next = (tex + 1) % N64_TEX.length;
+				prefs.edit().putString("n64_tex", N64_TEX[next]).apply();
+				retro.updateVariables(new Variable("mupen64plus-txEnhancementMode", N64_TEX[next], null));
+				Toast.makeText(this, "Texturas " + DC_TEX_NAMES[next]
+					+ ": si no cambian, vuelve a abrir el juego. xBRZ suaviza los dibujos; pide más al teléfono.", Toast.LENGTH_LONG).show();
+				return true;
+			});
+			labels.add("🖥  Pantalla ancha: " + (wide ? "sí (16:9)" : "no (4:3)"));
+			actions.add(() -> {
+				prefs.edit().putBoolean("n64_wide", !wide).apply();
+				Toast.makeText(this, "Se aplica la próxima vez que abras el juego. En algunos juegos se ven fallos en los bordes.", Toast.LENGTH_LONG).show();
+				return true;
+			});
+		} else if (dc) {
 			final int res = Math.max(0, java.util.Arrays.asList(DC_RES).indexOf(prefs.getString("dc_res", DC_RES[0])));
 			final int tex = Math.max(0, java.util.Arrays.asList(DC_TEX).indexOf(prefs.getString("dc_tex", DC_TEX[0])));
 			final boolean wide = prefs.getBoolean("dc_wide", false);
