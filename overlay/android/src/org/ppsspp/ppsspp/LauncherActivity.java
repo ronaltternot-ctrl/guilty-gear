@@ -299,20 +299,27 @@ public class LauncherActivity extends Activity {
 	private static final int PSP_H = 272;
 	private static final int MAX_RES = 8;
 
-	// Palette: minimal and retro, after the PlayStation 2's menus (deep blue, black, soft blue light).
-	private static final int C_BG = 0xFF02040B;
-	private static final int C_CARD = 0x590A1430;
-	private static final int C_STROKE = 0x332F4E8F;
-	private static final int C_ACCENT = 0xFF6F9BFF;
-	private static final int C_TEXT = 0xFFE9EEF9;
-	private static final int C_MUTED = 0xFF8792AE;
+	// Palette, set by applyTheme() from the chosen game's GameTheme. The defaults are the PS2 one:
+	// minimal and retro, after the PlayStation 2's menus (deep blue, black, soft blue light).
+	private static int C_BG = 0xFF02040B;
+	private static int C_CARD = 0x590A1430;
+	private static int C_STROKE = 0x332F4E8F;
+	private static int C_ACCENT = 0xFF6F9BFF;
+	private static int C_TEXT = 0xFFE9EEF9;
+	private static int C_MUTED = 0xFF8792AE;
 	private static final int C_OK = 0xFF5BD69A;
 	private static final int C_WARN = 0xFFE8C15A;
-	private static final int C_CHIP_STROKE = 0x553D5A99;
-	/** The soft blue glow behind titles and selected items. */
-	private static final int C_GLOW = 0x996F9BFF;
-	/** Section titles: light, spaced, a little blue. */
-	private static final int C_SECTION = 0xFFB8C6E6;
+	private static int C_CHIP_STROKE = 0x553D5A99;
+	/** The soft glow behind titles and selected items. */
+	private static int C_GLOW = 0x996F9BFF;
+	/** Section titles: light, spaced, tinted. */
+	private static int C_SECTION = 0xFFB8C6E6;
+	/** Bright light: lit edges, the play button's glow. */
+	private static int C_HI = 0xFFBFD4FF;
+	/** The empty part of sliders and switches. */
+	private static int C_TRACK = 0xFF2A3350;
+	/** Dark inset boxes (game icons, text fields). */
+	private static int C_INSET = 0xFF070B18;
 
 	private final Handler handler = new Handler(Looper.getMainLooper());
 	private SharedPreferences prefs;
@@ -436,6 +443,14 @@ public class LauncherActivity extends Activity {
 
 	private final Runnable refreshRunningTask = this::refreshRunning;
 
+	/** Whether the screen takes the colors and style of the chosen game (else always PS2). */
+	private static final String K_GAME_THEME = "game_theme";
+	/** The theme the screen is built with. */
+	private GameTheme theme = GameTheme.get(GameTheme.PS2);
+	private View uiRoot;
+	private boolean switchingTheme;
+	private ScrollView catalogScroll;
+
 	// -------------------------------------------------------------------------------------------
 	// Lifecycle
 
@@ -451,7 +466,9 @@ public class LauncherActivity extends Activity {
 		if (!prefs.contains(K_BACKEND)) {
 			prefs.edit().putString(K_BACKEND, defaultBackend()).apply();
 		}
-		setContentView(buildUi());
+		applyTheme(GameTheme.get(wantedTheme()));
+		uiRoot = buildUi();
+		setContentView(uiRoot);
 		// First launch: test the phone once and suggest settings.
 		if (!prefs.contains(K_BENCH) && !prefs.getBoolean(K_BENCH_ASKED, false)) {
 			prefs.edit().putBoolean(K_BENCH_ASKED, true).apply();
@@ -1497,6 +1514,90 @@ public class LauncherActivity extends Activity {
 			headerTitle.setText("ΛCORE PLUS");
 			headerSubtitle.setText("Edición PSP · listo para jugar en Android");
 		}
+		maybeSwitchTheme();
+	}
+
+	// -------------------------------------------------------------------------------------------
+	// The screen's theme follows the chosen game
+
+	/** The theme for the chosen game: its own for the fighting games the app knows, else PS2. */
+	private int wantedTheme() {
+		if (!prefs.getBoolean(K_GAME_THEME, true) || prefs.getString(K_URI, null) == null) {
+			return GameTheme.PS2;
+		}
+		if (!prefs.getBoolean(K_INSPECTED, false)) {
+			// Still checking a new file: keep the current look until we know which game it is.
+			return theme.id;
+		}
+		GameInspector.Result r = new GameInspector.Result(
+			prefs.getString(K_FORMAT, null), prefs.getString(K_ID, null), prefs.getString(K_TITLE, null));
+		switch (r.match()) {
+			case TARGET:
+			case OTHER_GUILTY_GEAR:
+				return GameTheme.GUILTY_GEAR;
+			case BLAZBLUE:
+				return GameTheme.BLAZBLUE;
+			case KOF:
+				return GameTheme.KOF;
+			case STREET_FIGHTER:
+				return GameTheme.STREET_FIGHTER;
+			default:
+				return GameTheme.PS2;
+		}
+	}
+
+	@SuppressWarnings("deprecation")
+	private void applyTheme(GameTheme t) {
+		theme = t;
+		C_BG = t.bg;
+		C_CARD = t.card;
+		C_STROKE = t.stroke;
+		C_ACCENT = t.accent;
+		C_TEXT = t.text;
+		C_MUTED = t.muted;
+		C_CHIP_STROKE = t.chipStroke;
+		C_GLOW = t.glow;
+		C_SECTION = t.section;
+		C_HI = t.hi;
+		C_TRACK = t.track;
+		C_INSET = t.inset;
+		Window w = getWindow();
+		w.setBackgroundDrawable(new ColorDrawable(t.bg));
+		w.setStatusBarColor(t.bg);
+		w.setNavigationBarColor(t.bg);
+	}
+
+	/**
+	 * When the chosen game asks for another theme, builds the screen again with it, with a short
+	 * fade. Everything on the screen is rebuilt from the settings, so nothing is lost.
+	 */
+	private void maybeSwitchTheme() {
+		if (uiRoot == null || switchingTheme) {
+			return;
+		}
+		final GameTheme wanted = GameTheme.get(wantedTheme());
+		if (wanted == theme) {
+			return;
+		}
+		switchingTheme = true;
+		uiRoot.animate().alpha(0f).setDuration(140).withEndAction(() -> {
+			switchingTheme = false;
+			if (isFinishing() || isDestroyed()) {
+				return;
+			}
+			stopMusicPreview();
+			applyTheme(wanted);
+			uiRoot = buildUi();
+			uiRoot.setAlpha(0f);
+			setContentView(uiRoot);
+			// The new screen starts empty: fill it like when coming back to the app.
+			refreshAll();
+			refreshRunning();
+			if (catalogScroll != null) {
+				catalogScroll.setBackground(new GameBackground(theme, getResources().getDisplayMetrics().density));
+			}
+			uiRoot.animate().alpha(1f).setDuration(260).start();
+		}).start();
 	}
 
 	private org.json.JSONArray loadLibrary() {
@@ -1668,7 +1769,8 @@ public class LauncherActivity extends Activity {
 		}
 		Dialog d = new Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar);
 		ScrollView scroll = new ScrollView(this);
-		scroll.setBackground(new Ps2Background(getResources().getDisplayMetrics().density));
+		scroll.setBackground(new GameBackground(theme, getResources().getDisplayMetrics().density));
+		catalogScroll = scroll;
 		scroll.setFillViewport(true);
 		if (Build.VERSION.SDK_INT >= 35) {
 			scroll.setOnApplyWindowInsetsListener((v, insets) -> {
@@ -1693,6 +1795,7 @@ public class LauncherActivity extends Activity {
 		d.setOnDismissListener(x -> {
 			catalogDialog = null;
 			catalogBody = null;
+			catalogScroll = null;
 		});
 		catalogDialog = d;
 		catalogBody = col;
@@ -1908,7 +2011,7 @@ public class LauncherActivity extends Activity {
 		FrameLayout pic = new FrameLayout(this);
 		final IconView img = new IconView(this);
 		GradientDrawable round = new GradientDrawable();
-		round.setColor(0xFF070B18);
+		round.setColor(C_INSET);
 		round.setCornerRadius(dp(10));
 		img.setBackground(round);
 		img.setClipToOutline(true);
@@ -1994,7 +2097,7 @@ public class LauncherActivity extends Activity {
 
 		IconView img = new IconView(this);
 		GradientDrawable round = new GradientDrawable();
-		round.setColor(0xFF070B18);
+		round.setColor(C_INSET);
 		round.setCornerRadius(dp(10));
 		img.setBackground(round);
 		img.setClipToOutline(true);
@@ -2590,7 +2693,7 @@ public class LauncherActivity extends Activity {
 		musicListHeader.setOrientation(LinearLayout.HORIZONTAL);
 		musicListHeader.setGravity(Gravity.CENTER_VERTICAL);
 		musicListHeader.setPadding(dp(14), dp(12), dp(12), dp(12));
-		musicListHeader.setBackground(ripple(0xFF1C1C24, C_CHIP_STROKE, 12));
+		musicListHeader.setBackground(ripple(C_INSET, C_CHIP_STROKE, 12));
 		makeClickable(musicListHeader);
 		LinearLayout headerTexts = new LinearLayout(this);
 		headerTexts.setOrientation(LinearLayout.VERTICAL);
@@ -2638,7 +2741,7 @@ public class LauncherActivity extends Activity {
 		musicVolume.setMax(100);
 		musicVolume.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
 		musicVolume.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
-		musicVolume.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2A3350));
+		musicVolume.setProgressBackgroundTintList(ColorStateList.valueOf(C_TRACK));
 		musicVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 			@Override
 			public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -4488,9 +4591,10 @@ public class LauncherActivity extends Activity {
 	// UI construction (plain Android views, no XML layouts)
 
 	private View buildUi() {
+		effectRows.clear();
 		final ScrollView scroll = new ScrollView(this);
 		mainScroll = scroll;
-		scroll.setBackground(new Ps2Background(getResources().getDisplayMetrics().density));
+		scroll.setBackground(new GameBackground(theme, getResources().getDisplayMetrics().density));
 		scroll.setFillViewport(true);
 		if (Build.VERSION.SDK_INT >= 35) {
 			// Android 15+ draws apps edge-to-edge; keep content clear of the system bars.
@@ -4516,8 +4620,8 @@ public class LauncherActivity extends Activity {
 		headerKicker.setLetterSpacing(0.45f);
 		col.addView(headerKicker);
 		headerTitle = text("ΛCORE PLUS", 30, C_TEXT, false);
-		headerTitle.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
-		headerTitle.setLetterSpacing(0.06f);
+		headerTitle.setTypeface(theme.titleTypeface());
+		headerTitle.setLetterSpacing(theme.titleSpacing);
 		headerTitle.setShadowLayer(dp(10), 0, 0, C_GLOW);
 		headerTitle.setPadding(0, dp(2), 0, dp(2));
 		col.addView(headerTitle);
@@ -4527,7 +4631,7 @@ public class LauncherActivity extends Activity {
 		col.addView(headerSubtitle);
 		// A thin line of light under the title, like the PS2's menus.
 		View headerLine = new View(this);
-		headerLine.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] { C_ACCENT, 0x336F9BFF, 0x00000000 }));
+		headerLine.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] { C_ACCENT, GameTheme.alpha(C_ACCENT, 0x33), 0x00000000 }));
 		LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
 		lineLp.topMargin = dp(14);
 		col.addView(headerLine, lineLp);
@@ -4556,8 +4660,8 @@ public class LauncherActivity extends Activity {
 		gameRow.setOrientation(LinearLayout.HORIZONTAL);
 		gameIcon = new IconView(this);
 		GradientDrawable iconBg = new GradientDrawable();
-		iconBg.setColor(0xFF070B18);
-		iconBg.setCornerRadius(dp(10));
+		iconBg.setColor(C_INSET);
+		iconBg.setCornerRadius(dp(Math.min(10f, theme.cardRadius + 2)));
 		gameIcon.setBackground(iconBg);
 		gameIcon.setClipToOutline(true);
 		gameIcon.setVisibility(View.GONE);
@@ -4577,12 +4681,12 @@ public class LauncherActivity extends Activity {
 		gameRow.addView(gameTexts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 		game.addView(gameRow);
 		catalogButton = text("CATÁLOGO", 15, C_TEXT, false);
-		catalogButton.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		catalogButton.setTypeface(theme.buttonTypeface());
 		catalogButton.setGravity(Gravity.CENTER);
 		catalogButton.setLetterSpacing(0.3f);
 		catalogButton.setPadding(dp(16), dp(13), dp(16), dp(13));
 		catalogButton.setShadowLayer(dp(6), 0, 0, C_GLOW);
-		catalogButton.setBackground(ripple(0x1F6F9BFF, C_ACCENT, 14));
+		catalogButton.setBackground(ripple(GameTheme.alpha(C_ACCENT, 0x1F), C_ACCENT, 14));
 		makeClickable(catalogButton);
 		catalogButton.setOnClickListener(v -> showCatalog());
 		LinearLayout.LayoutParams catLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -4593,6 +4697,18 @@ public class LauncherActivity extends Activity {
 		LinearLayout.LayoutParams pickLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		pickLp.topMargin = dp(8);
 		game.addView(pick, pickLp);
+		LinearLayout themeRow = new LinearLayout(this);
+		themeRow.setOrientation(LinearLayout.VERTICAL);
+		themeRow.setPadding(0, dp(16), 0, 0);
+		game.addView(themeRow);
+		Switch themeSwitch = switchRow(themeRow, "Colores del juego",
+			"El menú toma los colores y el estilo del juego elegido. Apagado: siempre el estilo PS2.");
+		themeSwitch.setChecked(prefs.getBoolean(K_GAME_THEME, true));
+		themeSwitch.setOnCheckedChangeListener((b, on) -> {
+			prefs.edit().putBoolean(K_GAME_THEME, on).apply();
+			// Let the switch finish moving first.
+			handler.postDelayed(this::maybeSwitchTheme, 200);
+		});
 
 		buildMusicSection(col);
 
@@ -5252,7 +5368,7 @@ public class LauncherActivity extends Activity {
 		if (Build.VERSION.SDK_INT >= 21) {
 			fsrSeek.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
 			fsrSeek.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
-			fsrSeek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2A3350));
+			fsrSeek.setProgressBackgroundTintList(ColorStateList.valueOf(C_TRACK));
 		}
 		fsrSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 			@Override
@@ -5323,9 +5439,9 @@ public class LauncherActivity extends Activity {
 
 		// Play
 		playButton = filledButton("JUGAR", 20);
-		playButton.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+		playButton.setTypeface(theme.buttonTypeface());
 		playButton.setLetterSpacing(0.5f);
-		playButton.setShadowLayer(dp(8), 0, 0, 0xFFBFD4FF);
+		playButton.setShadowLayer(dp(8), 0, 0, C_HI);
 		playButton.setPadding(dp(16), dp(18), dp(16), dp(18));
 		playButton.setOnClickListener(v -> onPlayPressed());
 		LinearLayout.LayoutParams playParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -5370,8 +5486,12 @@ public class LauncherActivity extends Activity {
 		header.setPadding(0, dp(15), 0, dp(15));
 		makeClickable(header);
 		View light = new View(this);
-		GradientDrawable orb = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0xFFBFD4FF, C_ACCENT });
-		orb.setShape(GradientDrawable.OVAL);
+		GradientDrawable orb = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { C_HI, C_ACCENT });
+		// A dot of light (PS2), a diamond or a small square, depending on the game.
+		orb.setShape(theme.mark == GameTheme.MARK_DOT ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
+		if (theme.mark == GameTheme.MARK_DIAMOND) {
+			light.setRotation(45f);
+		}
 		light.setBackground(orb);
 		LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(6), dp(6));
 		orbLp.rightMargin = dp(12);
@@ -5410,7 +5530,7 @@ public class LauncherActivity extends Activity {
 		card.setPadding(dp(16), dp(16), dp(16), dp(16));
 		GradientDrawable bg = new GradientDrawable();
 		bg.setColor(C_CARD);
-		bg.setCornerRadius(dp(8));
+		bg.setCornerRadius(dp(theme.cardRadius));
 		bg.setStroke(Math.max(1, dp(0.75f)), strokeColor);
 		card.setBackground(bg);
 		return card;
@@ -5437,7 +5557,7 @@ public class LauncherActivity extends Activity {
 		if (Build.VERSION.SDK_INT >= 23) {
 			int[][] states = { { android.R.attr.state_checked }, {} };
 			sw.setThumbTintList(new ColorStateList(states, new int[] { C_ACCENT, 0xFFBDBDC6 }));
-			sw.setTrackTintList(new ColorStateList(states, new int[] { 0x996F9BFF, 0xFF2A3350 }));
+			sw.setTrackTintList(new ColorStateList(states, new int[] { C_GLOW, C_TRACK }));
 		}
 		row.addView(sw);
 		// Tapping anywhere on the row toggles the switch.
@@ -5457,8 +5577,8 @@ public class LauncherActivity extends Activity {
 		e.setFilters(new InputFilter[] { new InputFilter.LengthFilter(maxLength) });
 		e.setPadding(dp(14), dp(12), dp(14), dp(12));
 		GradientDrawable bg = new GradientDrawable();
-		bg.setColor(0x99070B18);
-		bg.setCornerRadius(dp(12));
+		bg.setColor(GameTheme.alpha(C_INSET, 0x99));
+		bg.setCornerRadius(dp(Math.min(12f, theme.buttonRadius * 2)));
 		bg.setStroke(dp(1.5f), C_CHIP_STROKE);
 		e.setBackground(bg);
 		return e;
@@ -5509,11 +5629,12 @@ public class LauncherActivity extends Activity {
 		return b;
 	}
 
-	/** The PS2's lit buttons: a blue glass gradient with a thin light edge. */
+	/** Lit buttons, like the PS2's: a glass gradient in the theme's color with a thin light edge. */
 	private Drawable glass(float radiusDp) {
-		GradientDrawable shape = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { 0xFF3D6AE0, 0xFF2346A8, 0xFF16307A });
+		radiusDp = themedRadius(radiusDp);
+		GradientDrawable shape = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] { theme.glassTop, theme.glassMid, theme.glassBottom });
 		shape.setCornerRadius(dp(radiusDp));
-		shape.setStroke(Math.max(1, dp(1)), 0xFF8FB2FF);
+		shape.setStroke(Math.max(1, dp(1)), theme.glassEdge);
 		GradientDrawable mask = new GradientDrawable();
 		mask.setColor(Color.WHITE);
 		mask.setCornerRadius(dp(radiusDp));
@@ -5541,7 +5662,7 @@ public class LauncherActivity extends Activity {
 	private void styleChip(TextView chip, boolean selected) {
 		chip.setBackground(selected ? glass(5) : ripple(Color.TRANSPARENT, C_CHIP_STROKE, 5));
 		chip.setTextColor(selected ? Color.WHITE : C_MUTED);
-		chip.setShadowLayer(selected ? dp(6) : 0, 0, 0, selected ? 0xCCBFD4FF : 0);
+		chip.setShadowLayer(selected ? dp(6) : 0, 0, 0, selected ? GameTheme.alpha(C_HI, 0xCC) : 0);
 		chip.setSelected(selected);
 	}
 
@@ -5551,8 +5672,8 @@ public class LauncherActivity extends Activity {
 	}
 
 	private Drawable ripple(int fill, int stroke, float radiusDp) {
-		// Sharper corners than before: the PS2's menus are made of thin straight lines.
-		radiusDp = Math.min(radiusDp, 6f);
+		// Sharp corners: the PS2's menus are made of thin straight lines (each game has its own).
+		radiusDp = themedRadius(Math.min(radiusDp, 6f));
 		GradientDrawable shape = new GradientDrawable();
 		shape.setColor(fill);
 		shape.setCornerRadius(dp(radiusDp));
@@ -5578,7 +5699,7 @@ public class LauncherActivity extends Activity {
 		if (Build.VERSION.SDK_INT >= 21) {
 			seek.setProgressTintList(ColorStateList.valueOf(C_ACCENT));
 			seek.setThumbTintList(ColorStateList.valueOf(C_ACCENT));
-			seek.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF2A3350));
+			seek.setProgressBackgroundTintList(ColorStateList.valueOf(C_TRACK));
 		}
 		seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 			@Override
@@ -5610,6 +5731,11 @@ public class LauncherActivity extends Activity {
 		lp.leftMargin = leftMargin;
 		lp.rightMargin = rightMargin;
 		return lp;
+	}
+
+	/** A button corner radius (designed for the PS2 theme's 6dp) in the current theme. */
+	private float themedRadius(float radiusDp) {
+		return radiusDp * theme.buttonRadius / 6f;
 	}
 
 	private int dp(float v) {
