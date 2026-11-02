@@ -27,6 +27,12 @@ final class RetroHudView extends View {
 	private float aspect;
 	private volatile boolean running;
 	private Thread thread;
+	/**
+	 * Both players were seen at full health at once (a round starting): the addresses are this
+	 * game's. Until then nothing is shown, so another version of the game (with its values
+	 * elsewhere) shows no HUD rather than a wrong one.
+	 */
+	private volatile boolean confirmed;
 
 	RetroHudView(Context c, SnesHud.Game game, float aspect, Typeface face) {
 		super(c);
@@ -81,6 +87,10 @@ final class RetroHudView extends View {
 			try {
 				if (RetroMemory.read(RetroMemory.SYSTEM_RAM, game.windowStart, ram)) {
 					game.read(ram, s);
+					if (!confirmed) {
+						confirmed = s.valid && s.health[0] == game.max && s.health[1] == game.max;
+						s.valid = confirmed;
+					}
 				}
 			} catch (UnsatisfiedLinkError e) {
 				// A LibretroDroid without patches/libretrodroid/0002: no HUD.

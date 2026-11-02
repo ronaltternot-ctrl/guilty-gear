@@ -24,6 +24,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 import android.util.DisplayMetrics;
@@ -1819,13 +1820,23 @@ public class LauncherActivity extends Activity {
 			list.add(0, entry);
 		}
 		String current = prefs.getString(K_URI, null);
+		org.json.JSONObject other = currentOther();
+		String currentOther = other == null ? null : other.optString("uri");
 		org.json.JSONArray out = new org.json.JSONArray();
+		int psp = 0;
 		for (int i = 0; i < list.size(); i++) {
 			org.json.JSONObject e = list.get(i);
-			if (out.length() < GameCatalog.MAX_GAMES || e.optString("uri").equals(current)) {
+			String u = e.optString("uri");
+			// Only PSP games count: each one holds a file permission, and Android allows a limited
+			// number. The other systems' games are copies inside the app: they always stay (if one
+			// left the catalog, its copy would stay on the phone with no way to remove it).
+			if (!GameCatalog.isPsp(e) || u.equals(current) || u.equals(currentOther)) {
+				out.put(e);
+			} else if (psp < GameCatalog.MAX_GAMES) {
+				psp++;
 				out.put(e);
 			} else {
-				releaseGame(e.optString("uri"));
+				releaseGame(u);
 			}
 		}
 		if (!out.toString().equals(lib.toString())) {
@@ -2428,6 +2439,11 @@ public class LauncherActivity extends Activity {
 			out.put(x.optString("uri").equals(oldUri) ? entry : x);
 		}
 		prefs.edit().putString(K_LIBRARY, out.toString()).apply();
+		org.json.JSONObject other = currentOther();
+		if (other != null && other.optString("uri").equals(oldUri)) {
+			// The chosen game was renamed (an arcade set): keep it chosen.
+			prefs.edit().putString(K_OTHER, entry.toString()).apply();
+		}
 		refreshLibrary();
 	}
 
@@ -2435,8 +2451,55 @@ public class LauncherActivity extends Activity {
 		startRetro(rom, title, ArcadeLibrary.SYSTEM);
 	}
 
-	/** A game on a libretro core: arcade (FBNeo) or PlayStation 1 (PCSX ReARMed). */
+	private long lastGameLaunch;
+
+	private int findProcess(String suffix) {
+		ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+		List<ActivityManager.RunningAppProcessInfo> processes = am == null ? null : am.getRunningAppProcesses();
+		if (processes == null) {
+			return -1;
+		}
+		String name = getPackageName() + suffix;
+		for (ActivityManager.RunningAppProcessInfo p : processes) {
+			if (name.equals(p.processName)) {
+				return p.pid;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Opens a game in its process (":arcade", ":mugen"), once: two taps in a row open it once (two
+	 * games in one process would share one emulator). A process still there (a game left in the
+	 * background, or one that is closing: it ends itself a moment after the game) is ended first,
+	 * else the new game would start in it and go down with it. Its saves were written when it left
+	 * the screen.
+	 */
+	private void startInProcess(String suffix, Runnable start) {
+		long now = SystemClock.elapsedRealtime();
+		if (now - lastGameLaunch < 1500) {
+			return;
+		}
+		lastGameLaunch = now;
+		int pid = findProcess(suffix);
+		if (pid > 0) {
+			android.os.Process.killProcess(pid);
+			handler.postDelayed(() -> {
+				if (!isFinishing() && !isDestroyed()) {
+					start.run();
+				}
+			}, 450);
+		} else {
+			start.run();
+		}
+	}
+
+	/** A game on a libretro core: arcade (FBNeo), PS1, N64, SNES or Dreamcast. */
 	private void startRetro(File rom, String title, String system) {
+		startInProcess(":arcade", () -> launchRetro(rom, title, system));
+	}
+
+	private void launchRetro(File rom, String title, String system) {
 		Intent i = new Intent(this, ArcadeActivity.class);
 		i.putExtra(ArcadeActivity.EXTRA_ROM, rom.getAbsolutePath());
 		i.putExtra(ArcadeActivity.EXTRA_TITLE, title);
@@ -2468,7 +2531,7 @@ public class LauncherActivity extends Activity {
 		} else if (gles != 0 && gles < 0x30002) {
 			problem = "Ikemen GO necesita una GPU con OpenGL ES 3.2 y tu teléfono indica OpenGL ES " + (gles >> 16) + "." + (gles & 0xFFFF) + ". Puede que no arranque.";
 		}
-		Runnable go = () -> {
+		Runnable go = () -> startInProcess(":mugen", () -> {
 			Intent i = new Intent(this, MugenActivity.class);
 			i.putExtra(MugenActivity.EXTRA_PATH, root.getAbsolutePath());
 			i.putExtra(MugenActivity.EXTRA_TITLE, title);
@@ -2480,7 +2543,7 @@ public class LauncherActivity extends Activity {
 				Log.w(TAG, "MUGEN", ex);
 				showMessage("No se pudo abrir el juego", String.valueOf(ex.getMessage()));
 			}
-		};
+		});
 		if (problem != null) {
 			new AlertDialog.Builder(this)
 				.setTitle("Tu teléfono podría no ser compatible")

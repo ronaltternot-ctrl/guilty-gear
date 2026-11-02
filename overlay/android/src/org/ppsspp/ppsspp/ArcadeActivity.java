@@ -11,7 +11,10 @@ import android.os.Looper;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.InputDevice;
+import android.view.InputEvent;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -149,6 +152,8 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	/** The game's own sound stays off: arcade boards mix music and effects, or the player asked. */
 	private boolean muteGame;
 	private boolean effectApplied;
+	/** The touch controls went away because a controller is being used (they come back on a touch). */
+	private boolean padAutoHidden;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -520,6 +525,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private void onRetroError(int code) {
+		if (isFinishing() || isDestroyed()) {
+			// While closing: no dialog over a screen that is going away.
+			return;
+		}
 		if (code == GLRetroView.ERROR_SERIALIZATION) {
 			Toast.makeText(this, "No se pudo cargar el estado guardado", Toast.LENGTH_LONG).show();
 			return;
@@ -577,6 +586,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		failed = true;
 		if (status != null) {
 			status.setVisibility(View.GONE);
+		}
+		if (isFinishing() || isDestroyed()) {
+			return;
 		}
 		new AlertDialog.Builder(this)
 			.setTitle(t)
@@ -972,6 +984,10 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		if (pad != null) {
 			pad.releaseAll();
 		}
+		if (hud != null) {
+			// No reading in the background (it would only use battery).
+			hud.stop();
+		}
 		if (music != null) {
 			music.setForeground(false);
 		}
@@ -995,6 +1011,69 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 				pauseGame();
 			}
 		});
+		if (hud != null && started && !failed) {
+			hud.start();
+		}
+	}
+
+	// Controllers (Bluetooth / USB). GLRetroView reads them itself, but only when it has the focus,
+	// which a SurfaceView doesn't take: hand it every event from a controller (the Back and Mode
+	// buttons still open the menu).
+
+	private static boolean fromController(InputEvent e) {
+		int s = e.getSource();
+		return (s & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+			|| (s & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+			|| ((s & InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD && e.getDevice() != null && e.getDevice().getControllerNumber() > 0);
+	}
+
+	@Override
+	public boolean dispatchKeyEvent(KeyEvent event) {
+		int code = event.getKeyCode();
+		if (retro != null && started && !failed && code != KeyEvent.KEYCODE_BACK && code != KeyEvent.KEYCODE_BUTTON_MODE && fromController(event)) {
+			boolean handled = false;
+			if (event.getAction() == KeyEvent.ACTION_DOWN) {
+				controllerUsed();
+				handled = retro.onKeyDown(code, event);
+			} else if (event.getAction() == KeyEvent.ACTION_UP) {
+				handled = retro.onKeyUp(code, event);
+			}
+			if (handled) {
+				return true;
+			}
+		}
+		return super.dispatchKeyEvent(event);
+	}
+
+	@Override
+	public boolean dispatchGenericMotionEvent(MotionEvent event) {
+		if (retro != null && started && !failed && (event.getSource() & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+			&& event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+			controllerUsed();
+			retro.onGenericMotionEvent(event);
+			return true;
+		}
+		return super.dispatchGenericMotionEvent(event);
+	}
+
+	/** Playing with a controller: the touch controls go away until the screen is touched. */
+	private void controllerUsed() {
+		if (pad != null && !padAutoHidden && pad.getVisibility() == View.VISIBLE) {
+			padAutoHidden = true;
+			pad.releaseAll();
+			pad.setVisibility(View.GONE);
+		}
+	}
+
+	@Override
+	public boolean dispatchTouchEvent(MotionEvent event) {
+		if (padAutoHidden && event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+			padAutoHidden = false;
+			if (pad != null && !prefs.getBoolean("hide_pad", false)) {
+				pad.setVisibility(View.VISIBLE);
+			}
+		}
+		return super.dispatchTouchEvent(event);
 	}
 
 	@Override

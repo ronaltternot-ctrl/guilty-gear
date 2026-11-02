@@ -108,6 +108,11 @@ Para actualizar en el futuro, vuelve a compilar y descarga el APK nuevo: se inst
 
 ## Detalles técnicos
 
+- **Controles Bluetooth / USB en PS1, N64, SNES, Dreamcast y Arcade**: la pantalla del juego le pasa al emulador cada botón y stick del control (el visor de LibretroDroid solo los lee si tiene el foco, y no lo toma solo). Al usar el control, los botones en pantalla se ocultan hasta que tocas la pantalla.
+- **Abrir juegos**: dos toques seguidos abren el juego una vez, y si el proceso de un juego anterior sigue ahí (en segundo plano o cerrándose), se cierra antes de abrir el nuevo (dos juegos en un proceso compartirían un solo emulador).
+- **Catálogo**: el límite de 40 juegos cuenta solo los de PSP (cada uno guarda un permiso de archivo); los de los otros sistemas son copias dentro de la app y siempre se quedan.
+- **HUD de SNES**: solo aparece después de ver a los dos jugadores con la vida llena a la vez (el inicio de un round), así otra versión del juego con sus valores en otro sitio no muestra barras equivocadas. Deja de leer la memoria cuando el juego pasa a segundo plano.
+
 - **Motor**: PPSSPP, versión fijada en [`PPSSPP_VERSION`](PPSSPP_VERSION).
 - **Cambios sobre PPSSPP** ([`patches/`](patches/)):
   - Pantalla de inicio propia (`LauncherActivity`) y nombre/ícono/paquete propios (`com.acplus.psplauncher`), así que convive con un PPSSPP normal.
