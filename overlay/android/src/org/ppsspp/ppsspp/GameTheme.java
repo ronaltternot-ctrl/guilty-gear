@@ -24,6 +24,9 @@ final class GameTheme {
 	static final int DREAMCAST = 8;
 	static final int MUGEN = 9;
 	static final int N64 = 10;
+	static final int SNES = 11;
+	/** Mortal Kombat on any system (the SNES ones have the custom HUD). */
+	static final int MORTAL_KOMBAT = 12;
 
 	/** Background pictures (GameBackground). */
 	static final int BG_TOWERS = 0;   // PS2: towers of light on a horizon, specks of light
@@ -130,7 +133,7 @@ final class GameTheme {
 	}
 
 	private static final GameTheme[] THEMES = { ps2(), guiltyGear(), blazBlue(), kof(), streetFighter(), yugioh(),
-		arcade(), psx(), dreamcast(), mugen(), n64() };
+		arcade(), psx(), dreamcast(), mugen(), n64(), snes(), mortalKombat() };
 
 	static GameTheme get(int id) {
 		return id >= 0 && id < THEMES.length ? THEMES[id] : THEMES[PS2];
@@ -522,6 +525,54 @@ final class GameTheme {
 		t.cardRadius = 8;
 		t.buttonRadius = 6;
 		t.mark = MARK_DIAMOND;
+		return t;
+	}
+
+	/** Super Nintendo: lavender, a "Mode 7" floor running to a striped sun, bold condensed letters. */
+	private static GameTheme snes() {
+		GameTheme t = tinted(SNES, 0xFFB49BFF, BG_GRID);
+		t.ink = 0xFFC77DFF;
+		t.inkHi = 0xFFE6CCFF;
+		t.ink2 = 0xFF9B8CFF;
+		t.ink3 = 0xFFFFC2E8;
+		t.sky = new int[] { 0xFF1C1238, 0xFF110B24, 0xFF080512, 0xFF000000 };
+		t.skyGlow = 0xFF5B3FA8;
+		t.titleFamily = "sans-serif-condensed";
+		t.titleStyle = Typeface.BOLD;
+		t.buttonFamily = "sans-serif-condensed";
+		t.buttonStyle = Typeface.BOLD;
+		t.titleAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.buttonAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.titleSpacing = 0.05f;
+		t.cardRadius = 10;
+		t.buttonRadius = 8;
+		t.mark = MARK_DOT;
+		return t;
+	}
+
+	/** Mortal Kombat: gold on black and blood red, fire from below, heavy condensed letters. */
+	private static GameTheme mortalKombat() {
+		GameTheme t = tinted(MORTAL_KOMBAT, 0xFFE8B030, BG_EMBERS);
+		t.ink = 0xFFD8321A;
+		t.inkHi = 0xFFFFC94D;
+		t.sky = new int[] { 0xFF1A0503, 0xFF0D0302, 0xFF080201, 0xFF160402 };
+		t.skyGlow = 0xFF8A1A0C;
+		t.card = 0x66140806;
+		t.glassTop = 0xFFB8231A;
+		t.glassMid = 0xFF7E140E;
+		t.glassBottom = 0xFF420806;
+		t.glassEdge = 0xFFF2C14A;
+		t.titleFamily = "sans-serif-condensed";
+		t.titleStyle = Typeface.BOLD;
+		t.buttonFamily = "sans-serif-condensed";
+		t.buttonStyle = Typeface.BOLD;
+		t.titleAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.buttonAsset = "DejaVuSansCondensed-Bold.ttf";
+		t.titleSpacing = 0.08f;
+		t.cardRadius = 2;
+		t.buttonRadius = 2;
+		t.mark = MARK_DIAMOND;
+		t.playLabel = "¡PELEA!";
 		return t;
 	}
 }

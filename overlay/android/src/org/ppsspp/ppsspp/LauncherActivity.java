@@ -77,6 +77,7 @@ public class LauncherActivity extends Activity {
 	private static final int REQUEST_ADD_MUSIC = 4207;
 	private static final int REQUEST_ADD_DC = 4208;
 	private static final int REQUEST_ADD_N64 = 4209;
+	private static final int REQUEST_ADD_SNES = 4210;
 
 	private static final String PREFS = "launcher";
 	private static final String K_URI = "game_uri";
@@ -536,6 +537,12 @@ public class LauncherActivity extends Activity {
 		if (requestCode == REQUEST_ADD_N64) {
 			if (resultCode == RESULT_OK && data != null) {
 				onN64Added(data);
+			}
+			return;
+		}
+		if (requestCode == REQUEST_ADD_SNES) {
+			if (resultCode == RESULT_OK && data != null) {
+				onSnesAdded(data);
 			}
 			return;
 		}
@@ -1412,7 +1419,7 @@ public class LauncherActivity extends Activity {
 			gameDetail.setText((there ? otherEngine(other) + " · " + other.optString("name")
 					: "La copia que guardó la app ya no está: quítalo del catálogo (mantén pulsado) y vuelve a añadirlo.")
 				+ "\nToca " + (theme.playLabel != null ? theme.playLabel : "JUGAR") + " para empezar. Casi todos los ajustes de abajo son de los juegos de PSP; "
-				+ "«Tu música» vale para todos y «Efectos · PS1, N64, Dreamcast y Arcade» para esos sistemas.");
+				+ "«Tu música» vale para todos y «Efectos · PS1, N64, SNES, DC y Arcade» para esos sistemas.");
 			refreshPlayLabel();
 			return;
 		}
@@ -1658,6 +1665,8 @@ public class LauncherActivity extends Activity {
 			return "Dreamcast · Flycast";
 		} else if (N64Library.SYSTEM.equals(sys)) {
 			return "Nintendo 64 · Mupen64Plus-Next";
+		} else if (SnesLibrary.SYSTEM.equals(sys)) {
+			return "Super Nintendo · Snes9x";
 		}
 		return "MUGEN · Ikemen GO";
 	}
@@ -1686,6 +1695,9 @@ public class LauncherActivity extends Activity {
 		if (flat.contains("YUGIOH")) {
 			return GameTheme.YUGIOH;
 		}
+		if (flat.contains("MORTALKOMB")) {
+			return GameTheme.MORTAL_KOMBAT;
+		}
 		if (arcade) {
 			return GameTheme.ARCADE;
 		} else if (PsxLibrary.SYSTEM.equals(sys)) {
@@ -1694,6 +1706,8 @@ public class LauncherActivity extends Activity {
 			return GameTheme.DREAMCAST;
 		} else if (N64Library.SYSTEM.equals(sys)) {
 			return GameTheme.N64;
+		} else if (SnesLibrary.SYSTEM.equals(sys)) {
+			return GameTheme.SNES;
 		}
 		return GameTheme.MUGEN;
 	}
@@ -1900,11 +1914,14 @@ public class LauncherActivity extends Activity {
 			"Emulador Flycast con el mando de Dreamcast (Y X B A, gatillos L y R, Start), flechas o joystick, estados guardados, resolución interna hasta ×3, texturas mejoradas con xBRZ, pantalla ancha y los efectos de imagen. Marvel vs. Capcom 2, Capcom vs. SNK 2, Street Fighter III 3rd Strike, Soulcalibur, Guilty Gear X y más. Pide un teléfono de gama media o alta." },
 		{ "Nintendo 64", ".z64 · .n64 · .v64 · .zip · .7z · sin BIOS",
 			"Emulador Mupen64Plus-Next (GLideN64) con el mando de N64 en pantalla: stick analógico, A y B, los cuatro botones C, Z, L, R y Start; un control Bluetooth funciona solo (los C en el stick derecho). Resolución hasta ×4, texturas mejoradas con xBRZ, pantalla ancha, estados guardados, partidas del cartucho y los efectos de imagen. Pide un teléfono de gama media o alta con OpenGL ES 3." },
+		{ "Super Nintendo", ".sfc · .smc · .zip · .7z · sin BIOS",
+			"Emulador Snes9x con el mando de Super Nintendo en pantalla (Y X B A, L, R, Select y Start), flechas o joystick, estados guardados, partidas del cartucho, los efectos de imagen (xBR y CRT quedan muy bien en 2D), proporción 4:3 u 8:7, menos parpadeo de sprites y mezcla de alta resolución. "
+			+ "HUD propio (Neón, Arcade, Lateral o Datos) en Ultimate Mortal Kombat 3, Mortal Kombat 3, Mortal Kombat II, Street Fighter II Turbo, Super Street Fighter II, Street Fighter Alpha 2 y Killer Instinct." },
 		{ "Juegos MUGEN (KOF 2012 fan made y otros)", "Carpeta o .zip del juego · motor Ikemen GO 1.0",
 			"Ikemen GO abre los juegos hechos para MUGEN 1.0 / 1.1 con su pantalla de título, selección y peleas. Controles táctiles en diseño KOF (A B C D) o de 6 botones. Necesita Android 13 o más nuevo y una GPU con OpenGL ES 3.2." },
 	};
 	private static final int[] SUPPORTED_BADGES = { GameCatalog.BADGE_GG, GameCatalog.BADGE_BB, GameCatalog.BADGE_KOF, GameCatalog.BADGE_SF,
-		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_PSX, GameCatalog.BADGE_DC, GameCatalog.BADGE_N64, GameCatalog.BADGE_MUGEN };
+		GameCatalog.BADGE_ARCADE, GameCatalog.BADGE_PSX, GameCatalog.BADGE_DC, GameCatalog.BADGE_N64, GameCatalog.BADGE_SNES, GameCatalog.BADGE_MUGEN };
 
 	/** ImageView with the shape of a PSP game icon (144 x 80). */
 	private static final class IconView extends ImageView {
@@ -2041,21 +2058,28 @@ public class LauncherActivity extends Activity {
 		others2.setOrientation(LinearLayout.HORIZONTAL);
 		TextView addN64 = outlineButton("+  Nintendo 64");
 		addN64.setOnClickListener(v -> pickN64());
-		TextView addDc = outlineButton("+  Dreamcast");
-		addDc.setOnClickListener(v -> pickDc());
+		TextView addSnes = outlineButton("+  Super Nintendo");
+		addSnes.setOnClickListener(v -> pickSnes());
 		others2.addView(addN64, weighted(0, dp(6)));
-		others2.addView(addDc, weighted(dp(6), 0));
+		others2.addView(addSnes, weighted(dp(6), 0));
 		LinearLayout.LayoutParams others2Lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		others2Lp.topMargin = dp(8);
 		col.addView(others2, others2Lp);
+		LinearLayout others3 = new LinearLayout(this);
+		others3.setOrientation(LinearLayout.HORIZONTAL);
+		TextView addDc = outlineButton("+  Dreamcast");
+		addDc.setOnClickListener(v -> pickDc());
 		TextView addMugen = outlineButton("+  Juego MUGEN");
 		addMugen.setOnClickListener(v -> pickMugen());
+		others3.addView(addDc, weighted(0, dp(6)));
+		others3.addView(addMugen, weighted(dp(6), 0));
 		LinearLayout.LayoutParams mugenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 		mugenLp.topMargin = dp(8);
-		col.addView(addMugen, mugenLp);
+		col.addView(others3, mugenLp);
 		TextView othersHint = text("Arcade: los ZIP del juego (kof2002.zip…) y la BIOS neogeo.zip, con el emulador FBNeo. "
 			+ "PlayStation 1: el .cue con sus .bin, o un .chd, .pbp, .iso, .zip o .7z, con el emulador PCSX ReARMed. "
 			+ "Nintendo 64: el .z64, .n64 o .v64 del juego (o un .zip o .7z con él), con el emulador Mupen64Plus-Next. "
+			+ "Super Nintendo: el .sfc o .smc del juego (o un .zip o .7z con él), con el emulador Snes9x. "
 			+ "Dreamcast: el .zip o .7z del juego (o el .gdi con sus pistas), un .cdi o un .chd, con el emulador Flycast. "
 			+ "MUGEN: la carpeta, el .zip o el .7z de un juego MUGEN (por ejemplo un KOF 2012 fan made), con el motor Ikemen GO. "
 			+ "Se copian dentro de la app.", 12, 0xFF6C6C78, false);
@@ -2087,7 +2111,7 @@ public class LauncherActivity extends Activity {
 			for (int b : GameCatalog.BADGE_ORDER) {
 				if (counts[b] > 0) {
 					addFilterChip(chips, b, (b == GameCatalog.BADGE_GG ? "Guilty Gear" : b == GameCatalog.BADGE_BB ? "BlazBlue" : b == GameCatalog.BADGE_KOF ? "KOF"
-						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : b == GameCatalog.BADGE_DC ? "Dreamcast" : b == GameCatalog.BADGE_N64 ? "N64" : b == GameCatalog.BADGE_YGO ? "Yu-Gi-Oh!" : "Otros") + " · " + counts[b]);
+						: b == GameCatalog.BADGE_SF ? "Street Fighter" : b == GameCatalog.BADGE_ARCADE ? "Arcade" : b == GameCatalog.BADGE_MUGEN ? "MUGEN" : b == GameCatalog.BADGE_PSX ? "PS1" : b == GameCatalog.BADGE_DC ? "Dreamcast" : b == GameCatalog.BADGE_N64 ? "N64" : b == GameCatalog.BADGE_SNES ? "SNES" : b == GameCatalog.BADGE_YGO ? "Yu-Gi-Oh!" : "Otros") + " · " + counts[b]);
 				}
 			}
 			LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2256,6 +2280,7 @@ public class LauncherActivity extends Activity {
 		final boolean psx = PsxLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final boolean dc = DreamcastLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final boolean n64 = N64Library.SYSTEM.equals(GameCatalog.system(e));
+		final boolean snes = SnesLibrary.SYSTEM.equals(GameCatalog.system(e));
 		final String title = e.optString("title", e.optString("name"));
 		int badge = GameCatalog.badge(e);
 		final boolean chosen = isCurrentOther(e);
@@ -2301,7 +2326,7 @@ public class LauncherActivity extends Activity {
 		File file = otherFile(e);
 		boolean there = file != null && file.exists();
 		TextView detail = text(there ? (arcade ? e.optString("name") + " · FBNeo" : psx ? e.optString("format") + " · PCSX ReARMed" : dc ? e.optString("format") + " · Flycast"
-			: n64 ? e.optString("format") + " · Mupen64Plus" : "Ikemen GO · " + e.optString("name"))
+			: n64 ? e.optString("format") + " · Mupen64Plus" : snes ? e.optString("format") + " · Snes9x" : "Ikemen GO · " + e.optString("name"))
 			: "⚠ Ya no está en la app: vuelve a añadirlo", 11, there ? C_MUTED : C_WARN, false);
 		detail.setMaxLines(1);
 		detail.setEllipsize(TextUtils.TruncateAt.END);
@@ -2384,6 +2409,8 @@ public class LauncherActivity extends Activity {
 			startDreamcast(f, title);
 		} else if (N64Library.SYSTEM.equals(GameCatalog.system(e))) {
 			startN64(f, title);
+		} else if (SnesLibrary.SYSTEM.equals(GameCatalog.system(e))) {
+			startRetro(f, title, SnesLibrary.SYSTEM);
 		} else {
 			startMugen(f, title);
 		}
@@ -2475,7 +2502,8 @@ public class LauncherActivity extends Activity {
 			String sys = GameCatalog.system(e);
 			File games = PsxLibrary.SYSTEM.equals(sys) ? PsxLibrary.gamesDir(this)
 				: DreamcastLibrary.SYSTEM.equals(sys) ? DreamcastLibrary.gamesDir(this)
-				: N64Library.SYSTEM.equals(sys) ? N64Library.gamesDir(this) : MugenInstaller.gamesDir(this);
+				: N64Library.SYSTEM.equals(sys) ? N64Library.gamesDir(this)
+				: SnesLibrary.SYSTEM.equals(sys) ? SnesLibrary.gamesDir(this) : MugenInstaller.gamesDir(this);
 			File cur = f;
 			while (cur != null && cur.getParentFile() != null && !games.equals(cur.getParentFile())) {
 				cur = cur.getParentFile();
@@ -2489,7 +2517,7 @@ public class LauncherActivity extends Activity {
 			.setTitle("¿Quitar del catálogo?")
 			.setMessage(title + "\n\nSe borra la copia que guardó la app (" + String.format(Locale.ROOT, "%.0f MB", bytes / 1048576.0)
 				+ ")" + (arcade || PsxLibrary.SYSTEM.equals(GameCatalog.system(e)) || DreamcastLibrary.SYSTEM.equals(GameCatalog.system(e))
-					|| N64Library.SYSTEM.equals(GameCatalog.system(e)) ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
+					|| N64Library.SYSTEM.equals(GameCatalog.system(e)) || SnesLibrary.SYSTEM.equals(GameCatalog.system(e)) ? "" : ", con sus partidas guardadas") + ". Tu archivo original no se toca.")
 			.setPositiveButton("Quitar y borrar", (d, w) -> {
 				org.json.JSONArray lib = loadLibrary();
 				org.json.JSONArray out = new org.json.JSONArray();
@@ -2779,8 +2807,8 @@ public class LauncherActivity extends Activity {
 	}
 
 	private void buildRetroEffectsSection(LinearLayout col) {
-		LinearLayout fx = section(col, "EFECTOS · PS1, N64, DREAMCAST Y ARCADE");
-		TextView intro = text("Los mismos efectos de imagen que los juegos de PSP, para PlayStation 1, Nintendo 64, Dreamcast y Arcade / Neo Geo.", 13, C_MUTED, false);
+		LinearLayout fx = section(col, "EFECTOS · PS1, N64, SNES, DC Y ARCADE");
+		TextView intro = text("Los mismos efectos de imagen que los juegos de PSP, para PlayStation 1, Nintendo 64, Super Nintendo, Dreamcast y Arcade / Neo Geo.", 13, C_MUTED, false);
 		intro.setPadding(0, 0, 0, dp(10));
 		fx.addView(intro);
 		RetroEffects.Effect[] effects = RetroEffects.EFFECTS;
@@ -2801,6 +2829,7 @@ public class LauncherActivity extends Activity {
 					retroPrefs(PsxLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
 					retroPrefs(DreamcastLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
 					retroPrefs(N64Library.SYSTEM).edit().putString("shader", effect.id).commit();
+					retroPrefs(SnesLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
 					retroPrefs(ArcadeLibrary.SYSTEM).edit().putString("shader", effect.id).commit();
 					refreshRetroEffects();
 				});
@@ -3071,6 +3100,9 @@ public class LauncherActivity extends Activity {
 			if (s.usesIn(MusicPlayer.N64)) {
 				b.append("• Nintendo 64: el juego mezcla la música y los efectos él mismo, así que se apaga todo el sonido del juego. Para oír el juego, desmarca «N64».\n");
 			}
+			if (s.usesIn(MusicPlayer.SNES)) {
+				b.append("• Super Nintendo: el chip de sonido toca la música y los efectos a la vez, así que se apaga todo el sonido del juego. Para oír el juego, desmarca «SNES».\n");
+			}
 			if (s.usesIn(MusicPlayer.DC)) {
 				b.append("• Dreamcast: la música y los efectos salen mezclados del chip de sonido, así que se apaga todo el sonido del juego. Para oír el juego, desmarca «DC».\n");
 			}
@@ -3253,6 +3285,80 @@ public class LauncherActivity extends Activity {
 		}
 		musicPreview = null;
 		musicPreviewFile = null;
+	}
+
+	private void pickSnes() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+		try {
+			startActivityForResult(intent, REQUEST_ADD_SNES);
+			Toast.makeText(this, "Elige el .sfc o .smc del juego (o su .zip / .7z). Puedes elegir varios a la vez.", Toast.LENGTH_LONG).show();
+		} catch (ActivityNotFoundException ex) {
+			showMessage("Sin selector de archivos", "Tu teléfono no tiene un selector de archivos disponible.");
+		}
+	}
+
+	/** «+ Super Nintendo»: copies each game into its own folder (archives unpacked: the core can't open them). */
+	private void onSnesAdded(Intent data) {
+		final List<Uri> uris = FileOps.uris(data);
+		if (uris.isEmpty()) {
+			return;
+		}
+		final android.app.ProgressDialog pd = progressDialog("Copiando juegos de Super Nintendo");
+		final android.content.Context app = getApplicationContext();
+		new Thread(() -> {
+			DiscLibrary.Result r = SnesLibrary.importFiles(app, uris, (what, done, total) -> handler.post(() -> pd.setMessage(
+				total > 0 ? String.format(Locale.ROOT, "%s\n%d de %d MB", what, done >> 20, total >> 20)
+					: String.format(Locale.ROOT, "%s\n%d MB", what, done >> 20))));
+			final List<org.json.JSONObject> added = new ArrayList<>();
+			int hud = 0;
+			for (File main : r.games) {
+				try {
+					String name = main.getName();
+					int dot = name.lastIndexOf('.');
+					String title = SnesLibrary.title(name);
+					if (SnesHud.identify(main, title) != null) {
+						hud++;
+					}
+					added.add(new org.json.JSONObject()
+						.put("system", SnesLibrary.SYSTEM)
+						.put("uri", Uri.fromFile(main).toString())
+						.put("name", name)
+						.put("title", title)
+						.put("id", "SNES")
+						.put("format", dot > 0 ? name.substring(dot + 1).toUpperCase(Locale.ROOT) : "SNES"));
+				} catch (org.json.JSONException ex) {
+					Log.w(TAG, "SNES entry", ex);
+				}
+			}
+			final int withHud = hud;
+			handler.post(() -> {
+				doneProgress(pd);
+				if (isFinishing() || isDestroyed()) {
+					return;
+				}
+				for (int i = added.size() - 1; i >= 0; i--) {
+					putInLibrary(added.get(i), true);
+				}
+				refreshLibrary();
+				StringBuilder msg = new StringBuilder();
+				if (!added.isEmpty()) {
+					msg.append(added.size() == 1 ? "Se añadió 1 juego de Super Nintendo." : "Se añadieron " + added.size() + " juegos de Super Nintendo.");
+				}
+				if (withHud > 0) {
+					msg.append(withHud == added.size() && withHud == 1 ? " Tiene HUD propio: se cambia en el menú del juego (botón Atrás)."
+						: " " + withHud + " con HUD propio: se cambia en el menú del juego (botón Atrás).");
+				}
+				if (!r.problems.isEmpty()) {
+					msg.append(msg.length() > 0 ? "\n\n" : "").append("No se añadieron:\n").append(TextUtils.join("\n", r.problems));
+				}
+				if (msg.length() > 0) {
+					showMessage("Super Nintendo", msg.toString());
+				}
+			});
+		}, "SnesAdd").start();
 	}
 
 	private void pickN64() {
@@ -4225,6 +4331,9 @@ public class LauncherActivity extends Activity {
 		+ "■ Mupen64Plus-Next (Nintendo 64)\n"
 		+ "Emulador de Nintendo 64 de los autores de Mupen64Plus, con GLideN64 de Sergey Lipskiy y colaboradores "
 		+ "(github.com/libretro/mupen64plus-libretro-nx), versión libretro para OpenGL ES 3 compilada por Lemuroid. Licencia GPL 2.0.\n\n"
+		+ "■ Snes9x (Super Nintendo)\n"
+		+ "Emulador de Super Nintendo del equipo de Snes9x (github.com/snes9xgit/snes9x), versión libretro 1.63 compilada por Lemuroid. "
+		+ "Licencia de Snes9x: uso no comercial. La app es gratis.\n\n"
 		+ "■ LibretroDroid\n"
 		+ "Frontend libretro para Android de Filippo Scognamiglio (github.com/Swordfish90/LibretroDroid). Licencia GPL 3.0.\n\n"
 		+ "■ Ikemen GO (MUGEN)\n"

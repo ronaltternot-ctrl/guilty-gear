@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads the engines of the other systems into the PPSSPP tree prepared by prepare.sh:
-#   - FBNeo, PCSX ReARMed and Mupen64Plus-Next (GLES3) libretro cores (arcade / Neo Geo,
-#     PlayStation 1 and Nintendo 64 games), Lemuroid's Android builds, pinned commit.
+#   - FBNeo, PCSX ReARMed, Mupen64Plus-Next (GLES3) and Snes9x libretro cores (arcade / Neo Geo,
+#     PlayStation 1, Nintendo 64 and Super Nintendo games), Lemuroid's Android builds, pinned commit.
 #   - Ikemen GO v1.0.0 for Android (MUGEN games): libmain.so with SDL2, FFmpeg and libxmp,
 #     and the engine files a MUGEN game doesn't have (external/, data/, font/).
 # Native libraries go to android/extlibs/<abi> (patches/0008 adds it to jniLibs), the engine
@@ -25,6 +25,7 @@ CORES="
 fbneo lemuroid_core_fbneo 88fd9f4aa9d8f235b58e64e78947ede0965c1e7ff85caf03dbcfcfe914b2e583
 pcsx_rearmed lemuroid_core_pcsx_rearmed 1c32c21dcc488889db7556bd0bd11c72219228f8d35d36bc30c640472af21fd3
 mupen64plus_next_gles3 lemuroid_core_mupen64plus_next_gles3 c7e44a9f6bfc67411a76d0253e12b546cd36746cc5adf2fffe68146544fe8d7a
+snes9x lemuroid_core_snes9x 4e5dc9199967f23bca5a8f56142f737ecd110b75afd05b2b90df6bf622b2806b
 "
 
 IKEMEN_VERSION="v1.0.0"

@@ -48,7 +48,7 @@ jobs:
           path: build/engine-cache
           key: engines-${{ hashFiles('scripts/fetch_engines.sh', 'scripts/build_libretrodroid.sh', 'patches/libretrodroid/*.patch', 'scripts/build_flycast.sh') }}
 
-      - name: Descargar los motores de Arcade (FBNeo), PS1, N64 y MUGEN (Ikemen GO)
+      - name: Descargar los motores de Arcade (FBNeo), PS1, N64, SNES y MUGEN (Ikemen GO)
         run: bash scripts/fetch_engines.sh "$GITHUB_WORKSPACE/build/ppsspp"
 
       - name: Compilar LibretroDroid con los efectos de imagen (PS1 y Arcade)
@@ -112,6 +112,13 @@ jobs:
           fi
           if ! unzip -l "$APK" | grep -q "lib/arm64-v8a/libmupen64plus_next_gles3_libretro_android.so"; then
             echo "The APK has no Nintendo 64 core"; exit 1
+          fi
+          if ! unzip -l "$APK" | grep -q "lib/arm64-v8a/libsnes9x_libretro_android.so"; then
+            echo "The APK has no Super Nintendo core"; exit 1
+          fi
+          # The SNES HUD reads the game's memory through LibretroDroid (patches/libretrodroid/0002).
+          if ! unzip -p "$APK" lib/arm64-v8a/liblibretrodroid.so | grep -aq "Java_org_ppsspp_ppsspp_RetroMemory_read"; then
+            echo "LibretroDroid has no memory reading (the HUD needs it)"; exit 1
           fi
           cp "$APK" "out/$NAME"
           ls -la out

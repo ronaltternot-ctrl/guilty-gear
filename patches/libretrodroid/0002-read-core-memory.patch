@@ -1,0 +1,74 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.cpp b/libretrodroid/src/main/cpp/libretrodroid.cpp
+index 60640c4..abf42f9 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroid.cpp
+@@ -171,6 +171,22 @@ JNIEXPORT jboolean JNICALL LibretroDroid::unserializeSRAM(int8_t* data, size_t s
+     return true;
+ }
+ 
++bool LibretroDroid::readMemory(unsigned id, size_t offset, int8_t *out, size_t size) {
++    // Between two frames (the core runs with this lock held): the values belong to one frame.
++    std::lock_guard<std::mutex> lock(coreLock);
++
++    if (core == nullptr) {
++        return false;
++    }
++    size_t total = core->retro_get_memory_size(id);
++    auto *data = (int8_t *) core->retro_get_memory_data(id);
++    if (data == nullptr || offset > total || size > total - offset) {
++        return false;
++    }
++    memcpy(out, data + offset, size);
++    return true;
++}
++
+ std::pair<int8_t*, size_t> LibretroDroid::serializeSRAM() {
+     std::lock_guard<std::mutex> lock(coreLock);
+ 
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.h b/libretrodroid/src/main/cpp/libretrodroid.h
+index b507aee..b7fafc3 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.h
++++ b/libretrodroid/src/main/cpp/libretrodroid.h
+@@ -73,6 +73,9 @@ public:
+     std::pair<int8_t *, size_t> serializeSRAM();
+     jboolean unserializeSRAM(int8_t *data, size_t size);
+ 
++    // GBS++: copies part of the core's memory (RETRO_MEMORY_*), for the launcher's HUD.
++    bool readMemory(unsigned id, size_t offset, int8_t *out, size_t size);
++
+     void onSurfaceCreated();
+     void onSurfaceChanged(unsigned int width, unsigned int height);
+ 
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.cpp b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+index 2ec15cf..23b3deb 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+@@ -599,6 +599,28 @@ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setViewpor
+     LibretroDroid::getInstance().setViewportAlignment(viewportAlignment);
+ }
+ 
++// GBS++: org.ppsspp.ppsspp.RetroMemory.read(id, offset, out): fills out with the core's memory
++// from offset (RETRO_MEMORY_SYSTEM_RAM is 2). False when the core has no such memory (or no core).
++JNIEXPORT jboolean JNICALL Java_org_ppsspp_ppsspp_RetroMemory_read(
++    JNIEnv* env,
++    jclass obj,
++    jint id,
++    jint offset,
++    jbyteArray out
++) {
++    if (out == nullptr || id < 0 || offset < 0) {
++        return JNI_FALSE;
++    }
++    jsize size = env->GetArrayLength(out);
++    jbyte *buffer = env->GetByteArrayElements(out, nullptr);
++    if (buffer == nullptr) {
++        return JNI_FALSE;
++    }
++    bool ok = LibretroDroid::getInstance().readMemory((unsigned) id, (size_t) offset, (int8_t *) buffer, (size_t) size);
++    env->ReleaseByteArrayElements(out, buffer, ok ? 0 : JNI_ABORT);
++    return ok ? JNI_TRUE : JNI_FALSE;
++}
++
+ JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_refreshAspectRatio(
+     JNIEnv* env,
+     jclass obj

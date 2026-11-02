@@ -3,6 +3,7 @@ package org.ppsspp.ppsspp;
 import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -89,6 +90,13 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	/** GLideN64's texture enhancement: xBRZ, like the Dreamcast's. */
 	static final String[] N64_TEX = { "None", "2xBRZ", "4xBRZ" };
 
+	/** Snes9x 1.63 (Lemuroid's build). The RetroPad is the SNES pad: A, B, X, Y are its own. */
+	private static final String CORE_SNES = "libsnes9x_libretro_android.so";
+	private static final int SNES_A = KeyEvent.KEYCODE_BUTTON_A, SNES_B = KeyEvent.KEYCODE_BUTTON_B;
+	private static final int SNES_X = KeyEvent.KEYCODE_BUTTON_X, SNES_Y = KeyEvent.KEYCODE_BUTTON_Y;
+	// The Super Famicom's colors.
+	private static final int C_SNES_A = 0xFFE8433F, C_SNES_B = 0xFFF2C230, C_SNES_X = 0xFF4A7FE8, C_SNES_Y = 0xFF3BB56A;
+
 	// PlayStation: the RetroPad is the PlayStation pad (✕ = B, ○ = A, □ = Y, △ = X).
 	private static final int PS_CROSS = KeyEvent.KEYCODE_BUTTON_B, PS_CIRCLE = KeyEvent.KEYCODE_BUTTON_A;
 	private static final int PS_SQUARE = KeyEvent.KEYCODE_BUTTON_Y, PS_TRIANGLE = KeyEvent.KEYCODE_BUTTON_X;
@@ -125,6 +133,11 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	private boolean dc;
 	/** Nintendo 64 (Mupen64Plus-Next). */
 	private boolean n64;
+	/** Super Nintendo (Snes9x). */
+	private boolean snes;
+	/** The custom HUD, for the SNES fighting games SnesHud knows (null otherwise). */
+	private RetroHudView hud;
+	private SnesHud.Game hudGame;
 	private boolean cUp, cLeft, cRight, cDown;
 	/** ArcadeLibrary.SYSTEM, PsxLibrary.SYSTEM or DreamcastLibrary.SYSTEM: also the prefs and folder name. */
 	private String system;
@@ -144,7 +157,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		psx = PsxLibrary.SYSTEM.equals(sys);
 		dc = DreamcastLibrary.SYSTEM.equals(sys);
 		n64 = N64Library.SYSTEM.equals(sys);
-		system = psx ? PsxLibrary.SYSTEM : dc ? DreamcastLibrary.SYSTEM : n64 ? N64Library.SYSTEM : ArcadeLibrary.SYSTEM;
+		snes = SnesLibrary.SYSTEM.equals(sys);
+		system = psx ? PsxLibrary.SYSTEM : dc ? DreamcastLibrary.SYSTEM : n64 ? N64Library.SYSTEM
+			: snes ? SnesLibrary.SYSTEM : ArcadeLibrary.SYSTEM;
 		prefs = getSharedPreferences(system, MODE_PRIVATE);
 
 		FrameLayout root = new FrameLayout(this);
@@ -162,14 +177,15 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		}
 		rom = new File(path);
 		// The name saves and states go by: the ROM set, or the PS1 game's folder.
-		set = psx || dc || n64 ? rom.getParentFile().getName().replaceAll("[^A-Za-z0-9._()\\-]", "_") : ArcadeLibrary.setName(rom.getName());
+		set = psx || dc || n64 || snes ? rom.getParentFile().getName().replaceAll("[^A-Za-z0-9._()\\-]", "_") : ArcadeLibrary.setName(rom.getName());
 		if (title == null || title.isEmpty()) {
 			title = psx ? PsxLibrary.title(rom.getName()) : dc ? DreamcastLibrary.title(rom.getName())
-				: n64 ? N64Library.title(rom.getName()) : ArcadeCheck.title(this, set);
+				: n64 ? N64Library.title(rom.getName()) : snes ? SnesLibrary.title(rom.getName()) : ArcadeCheck.title(this, set);
 		}
 		GameRun.begin(this, ":arcade", title, rom.getName() + " (" + (rom.length() / 1048576) + " MB)");
-		neoGeo = !psx && !dc && !n64 && (ArcadeCheck.info(this, set) != null || ArcadeLibrary.looksNeoGeo(set));
-		String musicSystem = psx ? MusicPlayer.PSX : dc ? MusicPlayer.DC : n64 ? MusicPlayer.N64 : MusicPlayer.ARCADE;
+		neoGeo = !psx && !dc && !n64 && !snes && (ArcadeCheck.info(this, set) != null || ArcadeLibrary.looksNeoGeo(set));
+		String musicSystem = psx ? MusicPlayer.PSX : dc ? MusicPlayer.DC : n64 ? MusicPlayer.N64
+			: snes ? MusicPlayer.SNES : MusicPlayer.ARCADE;
 		music = MusicPlayer.create(this, musicSystem);
 		muteGame = music != null && MusicPlayer.mutesAllSound(this, musicSystem);
 		File base = new File(getFilesDir(), system);
@@ -182,7 +198,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			}
 		}
 
-		String coreName = psx ? CORE_PSX : dc ? CORE_DC : n64 ? CORE_N64 : CORE;
+		String coreName = psx ? CORE_PSX : dc ? CORE_DC : n64 ? CORE_N64 : snes ? CORE_SNES : CORE;
 		File coreFile = new File(getApplicationInfo().nativeLibraryDir, coreName);
 		GLRetroViewData data = new GLRetroViewData(this);
 		data.setCoreFilePath(coreFile.isFile() ? coreFile.getAbsolutePath() : coreName);
@@ -204,6 +220,17 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		getLifecycle().addObserver(retro);
 		GameRun.step(this, "emulador creado");
 		root.addView(retro, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+
+		if (snes) {
+			// The custom HUD (between the game and the touch controls), for the fighting games it knows.
+			hudGame = SnesHud.identify(rom, title);
+			if (hudGame != null) {
+				hud = new RetroHudView(this, hudGame, snesAspect(),
+					GameTheme.font(getAssets(), "DejaVuSansCondensed-Bold.ttf", "sans-serif-condensed", Typeface.BOLD));
+				hud.setDesign(prefs.getInt("hud_design", RetroHud.DESIGN_NEON));
+				root.addView(hud, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+			}
+		}
 
 		pad = new TouchPadView(this);
 		pad.setListener(this);
@@ -235,7 +262,21 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		return Math.max(0, java.util.Arrays.asList(N64_RES).indexOf(prefs.getString("n64_res", N64_RES[1])));
 	}
 
+	/** 4:3 like a TV, or 8:7: the SNES's 256 x 224 pixels, square. */
+	private float snesAspect() {
+		return "uncorrected".equals(prefs.getString("snes_aspect", "4:3")) ? 256f / 224f : 4f / 3f;
+	}
+
 	private Variable[] variables() {
+		if (snes) {
+			return new Variable[] {
+				new Variable("snes9x_aspect", prefs.getString("snes_aspect", "4:3"), null),
+				// The graphic improvements of a 2D console: less sprite flicker, the hi-res modes'
+				// two pictures blended (the image effects do the rest).
+				new Variable("snes9x_reduce_sprite_flicker", prefs.getBoolean("snes_flicker", true) ? "enabled" : "disabled", null),
+				new Variable("snes9x_hires_blend", prefs.getBoolean("snes_blend", false) ? "merge" : "disabled", null),
+			};
+		}
 		if (n64) {
 			int res = n64Res();
 			return new Variable[] {
@@ -330,6 +371,24 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private void applyPadSettings() {
+		if (snes) {
+			pad.setDiamond(
+				new TouchPadView.Spec("X", C_SNES_X, SNES_X),
+				new TouchPadView.Spec("Y", C_SNES_Y, SNES_Y),
+				new TouchPadView.Spec("A", C_SNES_A, SNES_A),
+				new TouchPadView.Spec("B", C_SNES_B, SNES_B),
+				new TouchPadView.Spec[] { new TouchPadView.Spec("L", C_SHORT, KeyEvent.KEYCODE_BUTTON_L1) },
+				new TouchPadView.Spec[] { new TouchPadView.Spec("R", C_SHORT, KeyEvent.KEYCODE_BUTTON_R1) },
+				new TouchPadView.Spec[] {
+					new TouchPadView.Spec("SELECT", 0xFFE8E8EE, KEY_COIN),
+					new TouchPadView.Spec("START", 0xFFE8E8EE, KEY_START),
+				});
+			pad.setStick("stick".equals(prefs.getString("move", "dpad")));
+			pad.setSizePercent(prefs.getInt("size", 100));
+			pad.setOpacity(prefs.getFloat("opacity", 0.85f));
+			pad.setVisibility(prefs.getBoolean("hide_pad", false) ? View.GONE : View.VISIBLE);
+			return;
+		}
 		if (n64) {
 			pad.setN64(
 				new TouchPadView.Spec("A", C_N64_A, N64_A),
@@ -423,7 +482,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 
 	/** Six buttons (Capcom) or four (Neo Geo and the rest), per game; Capcom's fighting games start with six. */
 	private boolean sixButtons() {
-		return !psx && !dc && !n64 && !neoGeo && "six".equals(prefs.getString("buttons_" + set, ArcadeLibrary.looksSixButton(set) ? "six" : "four"));
+		return !psx && !dc && !n64 && !snes && !neoGeo && "six".equals(prefs.getString("buttons_" + set, ArcadeLibrary.looksSixButton(set) ? "six" : "four"));
 	}
 
 	private void onFirstFrame() {
@@ -433,6 +492,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		started = true;
 		status.setVisibility(View.GONE);
 		GameRun.step(this, GameRun.STEP_PLAYING);
+		if (hud != null) {
+			hud.start();
+		}
 		applyGameAudio();
 		if (music != null) {
 			music.setRunning(!menuOpen);
@@ -470,7 +532,11 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 		String msg;
 		if (code == GLRetroView.ERROR_LOAD_LIBRARY) {
 			msg = "No se pudo cargar el emulador " + (psx ? "de PS1 (PCSX ReARMed)" : dc ? "de Dreamcast (Flycast)"
-				: n64 ? "de Nintendo 64 (Mupen64Plus-Next)" : "FBNeo") + " en este teléfono.";
+				: n64 ? "de Nintendo 64 (Mupen64Plus-Next)" : snes ? "de Super Nintendo (Snes9x)" : "FBNeo") + " en este teléfono.";
+		} else if (code == GLRetroView.ERROR_LOAD_GAME && snes) {
+			msg = "El emulador de Super Nintendo no pudo abrir «" + rom.getName() + "».\n\n"
+				+ "• Formatos que abre: .sfc, .smc, .fig, .swc (o un .zip / .7z con uno de ellos).\n"
+				+ "• El archivo puede estar incompleto o dañado: vuelve a añadirlo.";
 		} else if (code == GLRetroView.ERROR_LOAD_GAME && n64) {
 			msg = "El emulador de Nintendo 64 no pudo abrir «" + rom.getName() + "».\n\n"
 				+ "• Formatos que abre: .z64, .n64 y .v64 (o un .zip / .7z con uno de ellos).\n"
@@ -650,7 +716,7 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 				return true;
 			});
 		}
-		if (!psx && !dc && !n64 && !neoGeo) {
+		if (!psx && !dc && !n64 && !snes && !neoGeo) {
 			labels.add("🔘  Botones: " + (six ? "6 (LP MP HP / LK MK HK, Capcom)" : "4 (A B C D)"));
 			actions.add(() -> {
 				prefs.edit().putString("buttons_" + set, six ? "four" : "six").apply();
@@ -678,7 +744,47 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 			pickShader();
 			return false;
 		});
-		if (n64) {
+		if (snes) {
+			final boolean exact = "uncorrected".equals(prefs.getString("snes_aspect", "4:3"));
+			final boolean flicker = prefs.getBoolean("snes_flicker", true);
+			final boolean blend = prefs.getBoolean("snes_blend", false);
+			if (hudGame != null) {
+				final int design = prefs.getInt("hud_design", RetroHud.DESIGN_NEON);
+				labels.add("📊  HUD propio: " + RetroHud.DESIGN_NAMES[design]);
+				actions.add(() -> {
+					int next = (design + 1) % RetroHud.DESIGN_NAMES.length;
+					prefs.edit().putInt("hud_design", next).apply();
+					hud.setDesign(next);
+					Toast.makeText(this, next == RetroHud.DESIGN_OFF ? "HUD propio apagado"
+						: "HUD " + RetroHud.DESIGN_NAMES[next] + " (" + hudGame.name + "): aparece durante las peleas", Toast.LENGTH_SHORT).show();
+					return true;
+				});
+			}
+			labels.add("🖥  Proporción: " + (exact ? "8:7 (píxeles exactos)" : "4:3 (como en la tele)"));
+			actions.add(() -> {
+				String next = exact ? "4:3" : "uncorrected";
+				prefs.edit().putString("snes_aspect", next).apply();
+				retro.updateVariables(new Variable("snes9x_aspect", next, null));
+				if (hud != null) {
+					hud.setAspect(snesAspect());
+				}
+				Toast.makeText(this, "Si no cambia, vuelve a abrir el juego", Toast.LENGTH_SHORT).show();
+				return true;
+			});
+			labels.add("✨  Menos parpadeo de sprites: " + (flicker ? "sí" : "no"));
+			actions.add(() -> {
+				prefs.edit().putBoolean("snes_flicker", !flicker).apply();
+				retro.updateVariables(new Variable("snes9x_reduce_sprite_flicker", !flicker ? "enabled" : "disabled", null));
+				return true;
+			});
+			labels.add("🌫  Mezclar la alta resolución: " + (blend ? "sí" : "no"));
+			actions.add(() -> {
+				prefs.edit().putBoolean("snes_blend", !blend).apply();
+				retro.updateVariables(new Variable("snes9x_hires_blend", !blend ? "merge" : "disabled", null));
+				Toast.makeText(this, "Para los juegos que usan el modo de alta resolución (sus transparencias se ven como en la tele)", Toast.LENGTH_LONG).show();
+				return true;
+			});
+		} else if (n64) {
 			final int res = n64Res();
 			final int tex = Math.max(0, java.util.Arrays.asList(N64_TEX).indexOf(prefs.getString("n64_tex", N64_TEX[0])));
 			final boolean wide = prefs.getBoolean("n64_wide", false);
@@ -846,6 +952,9 @@ public class ArcadeActivity extends ComponentActivity implements TouchPadView.Li
 	}
 
 	private void exit(boolean save) {
+		if (hud != null) {
+			hud.stop();
+		}
 		if (save) {
 			pauseGame();
 			saveSram();
