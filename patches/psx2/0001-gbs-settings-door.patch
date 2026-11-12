@@ -1,0 +1,87 @@
+diff --git a/app/src/main/cpp/native-lib.cpp b/app/src/main/cpp/native-lib.cpp
+index 08f4908..957166b 100644
+--- a/app/src/main/cpp/native-lib.cpp
++++ b/app/src/main/cpp/native-lib.cpp
+@@ -472,7 +472,8 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
+ //        }
+ 
+         // Enable RetroAchievements
+-        si.SetBoolValue("Achievements", "Enabled", true);
++        // GBS++: no RetroAchievements screen in this launcher, so the client stays off.
++        si.SetBoolValue("Achievements", "Enabled", false);
+         si.SetBoolValue("Achievements", "HardcoreMode", false);
+         si.SetBoolValue("Achievements", "Notifications", true);
+         si.SetBoolValue("Achievements", "LeaderboardNotifications", true);
+@@ -484,15 +485,63 @@ Java_com_izzy2lost_psx2_NativeApp_initialize(JNIEnv *env, jclass clazz,
+ 
+     VMManager::Internal::LoadStartupSettings();
+     
+-    // Initialize RetroAchievements JNI bridge
+-    if (!AchievementsJNI::Initialize(env))
+-    {
+-        __android_log_print(ANDROID_LOG_ERROR, "PCSX2", "Failed to initialize AchievementsJNI");
+-    }
+-    else
+-    {
+-        __android_log_print(ANDROID_LOG_INFO, "PCSX2", "AchievementsJNI initialized successfully");
+-    }
++    // GBS++: the RetroAchievements Java bridge isn't part of this launcher.
++}
++
++// GBS++: one generic door to the emulator's settings, so the launcher can turn on what the
++// original app has no switch for (texture filtering, anisotropic filtering, FXAA, CAS
++// sharpening, TV shaders, dithering, speed hacks...). Values go to the base layer; they're
++// applied at once when a game is running, else at the next boot.
++static void GbsApplySettings()
++{
++    if (VMManager::HasValidVM())
++        VMManager::ApplySettings();
++    if (MTGS::IsOpen())
++        MTGS::ApplySettings();
++}
++
++extern "C"
++JNIEXPORT void JNICALL
++Java_com_izzy2lost_psx2_NativeApp_setSettingString(JNIEnv* env, jclass, jstring p_section, jstring p_key, jstring p_value)
++{
++    const std::string section = GetJavaString(env, p_section);
++    const std::string key = GetJavaString(env, p_key);
++    const std::string value = GetJavaString(env, p_value);
++    s_settings_interface.SetStringValue(section.c_str(), key.c_str(), value.c_str());
++}
++
++extern "C"
++JNIEXPORT void JNICALL
++Java_com_izzy2lost_psx2_NativeApp_setSettingBool(JNIEnv* env, jclass, jstring p_section, jstring p_key, jboolean p_value)
++{
++    const std::string section = GetJavaString(env, p_section);
++    const std::string key = GetJavaString(env, p_key);
++    s_settings_interface.SetBoolValue(section.c_str(), key.c_str(), p_value == JNI_TRUE);
++}
++
++extern "C"
++JNIEXPORT void JNICALL
++Java_com_izzy2lost_psx2_NativeApp_setSettingInt(JNIEnv* env, jclass, jstring p_section, jstring p_key, jint p_value)
++{
++    const std::string section = GetJavaString(env, p_section);
++    const std::string key = GetJavaString(env, p_key);
++    s_settings_interface.SetIntValue(section.c_str(), key.c_str(), static_cast<int>(p_value));
++}
++
++extern "C"
++JNIEXPORT void JNICALL
++Java_com_izzy2lost_psx2_NativeApp_setSettingFloat(JNIEnv* env, jclass, jstring p_section, jstring p_key, jfloat p_value)
++{
++    const std::string section = GetJavaString(env, p_section);
++    const std::string key = GetJavaString(env, p_key);
++    s_settings_interface.SetFloatValue(section.c_str(), key.c_str(), static_cast<float>(p_value));
++}
++
++extern "C"
++JNIEXPORT void JNICALL
++Java_com_izzy2lost_psx2_NativeApp_applySettings(JNIEnv*, jclass)
++{
++    GbsApplySettings();
+ }
+ 
+ extern "C"
