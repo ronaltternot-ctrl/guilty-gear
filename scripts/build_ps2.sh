@@ -92,6 +92,7 @@ if [ ! -f "$CACHED" ]; then
 		-DANDROID_PLATFORM=android-26 \
 		-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
 		-DANDROID_ABI="$ABI" \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 		"${LAUNCHER[@]}" > "$WORK/cmake.log" 2>&1 || fail "CMake could not configure PSX2" "$WORK/cmake.log"
 	"$CMAKE" --build "$WORK/build" --target PCSX2 -j "$(nproc)" > "$WORK/build.log" 2>&1 \
 		|| fail "PSX2 did not compile" "$WORK/build.log"
